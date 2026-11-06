@@ -13,6 +13,7 @@ import { chromium } from 'playwright';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import http from 'node:http';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_PATH = path.join(HERE, '..', '출장방문순서추천.html');
@@ -43,6 +44,8 @@ const MOCK_DB = [
   { id: 'p9', place_name: '앙성면 행정복지센터', road_address_name: '충청북도 충주시 앙성면 앙성로 1', address_name: '충청북도 충주시 앙성면 능암리 1', category_group_name: '공공기관', x: '127.8000000', y: '37.1100000', place_url: '' },
   { id: 'p10', place_name: '엄정면 행정복지센터', road_address_name: '충청북도 충주시 엄정면 엄정로 1', address_name: '충청북도 충주시 엄정면 용산리 1', category_group_name: '공공기관', x: '127.9500000', y: '37.1000000', place_url: '' },
   { id: 'p11', place_name: '산척면 행정복지센터', road_address_name: '충청북도 충주시 산척면 산척로 1', address_name: '충청북도 충주시 산척면 영덕리 1', category_group_name: '공공기관', x: '128.0300000', y: '37.0900000', place_url: '' },
+  // 긴 장소명·긴 주소 — 좁은 화면에서 줄바꿈과 가로폭을 시험하기 위한 항목
+  { id: 'p16', place_name: '한국교통대학교 충주캠퍼스 산학협력관', road_address_name: '충청북도 충주시 대학로 50 한국교통대학교 충주캠퍼스 산학협력관', address_name: '충청북도 충주시 검단동 123-45', category_group_name: '교육', x: '127.9330000', y: '36.9690000', place_url: '' },
   { id: 'p12', place_name: '서충주신도시', road_address_name: '', address_name: '충청북도 충주시 대소원면 완오리', category_group_name: '', x: '127.8600000', y: '36.9600000', place_url: '' },
   // 같은 이름 · 다른 주소 (사용자가 주소로 구분해야 하는 경우)
   { id: 'p13', place_name: '행복식당', road_address_name: '충청북도 충주시 으뜸로 50', address_name: '충청북도 충주시 금릉동 600', category_group_name: '음식점', x: '127.9210000', y: '36.9920000', place_url: '' },
@@ -152,10 +155,10 @@ try {
     await page.evaluate(() => document.querySelectorAll('script[src],link[rel=stylesheet]').length === 0));
   ok('<style> 태그 1개가 내부에 포함되어 있음',
     await page.evaluate(() => document.querySelectorAll('style').length === 1));
-  ok('내부 CSS가 실제로 적용됨 (헤더 배경색)',
-    await page.evaluate(() => getComputedStyle(document.querySelector('header.top')).backgroundColor === 'rgb(29, 78, 137)'));
+  ok('내부 CSS가 실제로 적용됨 (주요 버튼 배경색 토큰)',
+    await page.evaluate(() => getComputedStyle(document.querySelector('#btnSolve')).backgroundColor === 'rgb(27, 100, 218)'));
   ok('내부 JavaScript가 실행되어 UI가 초기화됨',
-    (await page.textContent('#stopCounter')) === '0 / 8');
+    (await page.textContent('#stopCounter')) === '0곳 등록');
   ok('제목이 한국어로 표시됨 (인코딩 정상)',
     (await page.title()) === '출장 방문순서 추천기');
 
@@ -240,8 +243,11 @@ try {
   /* ---------------- 3·4. 검색 결과 선택, 출장지 추가·삭제 ---------------- */
   section('3~4. 장소 검색 결과 선택 / 출장지 추가·삭제 (Mock SDK)');
   ({ ctx, page } = await newPage());
-  ok('SDK가 준비되면 안내문이 초록색으로 바뀜',
-    (await page.textContent('#sdkNote')).includes('장소 검색을 사용할 수 있습니다'));
+  // 이 블록은 file:// 로 열므로, SDK가 준비돼도 칩은 "로컬 실행"을 알려야 한다
+  ok('file://에서는 SDK가 준비돼도 헤더 칩이 “로컬 실행”으로 경고',
+    (await page.textContent('#sdkChipText')) === '로컬 실행');
+  ok('file://에서는 검색이 막힐 수 있음을 미리 안내',
+    (await page.textContent('#sdkNote')).includes('로컬 파일로 열려 있어'));
 
   // 출발지: 기본값이 충주시청으로 들어 있고, 검색 후 선택해야 확정된다
   ok('출발지 기본 검색어가 충주시청', (await page.inputValue('#originQuery')) === '충주시청');
@@ -285,8 +291,15 @@ try {
     '중앙탑면 행정복지센터', '수안보면 행정복지센터', '앙성면 행정복지센터', '엄정면 행정복지센터'];
   for (const q of EIGHT) await addStopByName(q);
   ok('출장지 8곳 등록 완료', await page.evaluate(() => window.__CJ__.state.stops.length === 8));
-  ok('등록 개수 표시가 8 / 8', (await page.textContent('#stopCounter')) === '8 / 8');
-  ok('목록에 8개 항목이 그려짐', (await page.locator('#stopList ol.stops li').count()) === 8);
+  ok('등록 개수를 사람이 읽는 문장으로 표시', (await page.textContent('#stopCounter')) === '8곳 등록 · 최대',
+    await page.textContent('#stopCounter'));
+  ok('목록에 8개 항목이 그려짐', (await page.locator('#stopList ul.stops li').count()) === 8);
+  ok('목록에는 좌표를 기본으로 노출하지 않음',
+    (await page.locator('#stopList .coord').count()) === 0);
+  await page.click('#btnCoordToggle');
+  ok('“좌표 표시”를 누르면 좌표가 나타남', (await page.locator('#stopList .coord').count()) === 8);
+  await page.click('#btnCoordToggle');
+  ok('다시 누르면 좌표가 숨겨짐', (await page.locator('#stopList .coord').count()) === 0);
 
   // 9번째 — 상한 초과
   await page.fill('#stopQuery', '산척면 행정복지센터');
@@ -294,13 +307,17 @@ try {
   await page.waitForSelector('#stopResults .item');
   await page.locator('#stopResults .item').first().locator('button').click();
   ok('9번째 출장지는 거부되고 한국어로 안내',
-    (await page.textContent('#stopMsg')).includes('최대 8곳'));
+    (await page.textContent('#stopMsg')).includes('8곳까지만 등록됩니다'));
   ok('거부 후에도 목록은 8곳 유지', await page.evaluate(() => window.__CJ__.state.stops.length === 8));
 
-  // 삭제
-  await page.locator('#stopList ol.stops li', { hasText: '엄정면' }).locator('button').click();
+  // 삭제 — 성공 피드백은 토스트로 짧게
+  await page.locator('#stopList ul.stops li', { hasText: '엄정면' }).locator('button').click();
   ok('출장지 삭제 동작', await page.evaluate(() => window.__CJ__.state.stops.length === 7));
-  ok('삭제 안내가 한국어로 표시', (await page.textContent('#stopMsg')).includes('삭제했습니다'));
+  ok('토스트는 한 번에 하나만 남아 화면을 가리지 않음',
+    (await page.locator('#toastHost .toast').count()) === 1,
+    String(await page.locator('#toastHost .toast').count()));
+  ok('삭제 성공은 토스트로 알림',
+    (await page.textContent('#toastHost')).includes('삭제됨'), await page.textContent('#toastHost'));
 
   /* ---------------- 9. 중복 / 동일 장소 방지 ---------------- */
   section('9. 중복 등록 및 출발지 중복 방지');
@@ -333,7 +350,19 @@ try {
     flow: document.querySelector('#resultFlow').textContent,
     rows: document.querySelectorAll('#resultTable tbody tr').length,
     sum: document.querySelector('#resultSum').textContent,
-    warn: [...document.querySelectorAll('#cardResult .note')].map(n => n.textContent).join(' ')
+    hero: document.querySelector('#resultTotal').textContent,
+    heroMeta: document.querySelector('#resultMeta').textContent,
+    warn: document.querySelector('#cardResult').textContent,
+    // 순서도가 총거리보다 먼저 와야 한다 (DOM 순서 = 읽는 순서)
+    flowFirst: document.querySelector('#cardResult').compareDocumentPosition(
+      document.querySelector('#resultFlow')) === document.querySelector('#cardResult')
+      .compareDocumentPosition(document.querySelector('#resultFlow')) &&
+      !!(document.querySelector('#resultFlow').compareDocumentPosition(
+        document.querySelector('#resultTotal')) & Node.DOCUMENT_POSITION_FOLLOWING),
+    // 복사·인쇄가 구간 표보다 먼저 와야 한다
+    copyBeforeTable: !!(document.querySelector('#btnCopy').compareDocumentPosition(
+      document.querySelector('#legsFold')) & Node.DOCUMENT_POSITION_FOLLOWING),
+    legsCollapsed: document.querySelector('#legsFold').open === false
   }));
   ok('복귀 기본값이 체크되어 있어 출발지로 복귀', r1.ret === true);
   ok('순서도의 처음과 끝이 출발지', r1.names[0] === '충주시청' && r1.names[r1.names.length - 1] === '충주시청');
@@ -346,12 +375,23 @@ try {
   }));
   ok('구간 수 = 출장지 7 + 복귀 1 = 8', r1.legs === 8, String(r1.legs));
   ok('순서도가 화살표로 그려짐', r1.flow.includes('→'));
-  ok('전체 방문 장소 수가 표시됨', r1.sum.includes('8개 지점'), r1.sum.replace(/\s+/g, ' ').slice(0, 120));
-  ok('총 직선거리가 표시됨', r1.sum.includes('km'));
+  ok('추천 방문순서가 총거리보다 먼저 배치됨', r1.flowFirst);
+  ok('총 직선거리가 큰 숫자로 강조 표시됨', /km|m$/.test(r1.hero.trim()), r1.hero);
+  ok('방문 지점 수·구간 수·복귀 여부가 함께 표시됨',
+    r1.heroMeta.includes('8개') && r1.heroMeta.includes('구간') && r1.heroMeta.includes('복귀'), r1.heroMeta);
+  ok('접근성용 요약에 총거리와 지점 수가 들어 있음',
+    r1.sum.includes('8개 지점') && r1.sum.includes('km'), r1.sum);
   ok('구간 표가 출력됨 (' + r1.rows + '행)', r1.rows === r1.names.length + 1);
+  ok('구간 상세표는 기본으로 접혀 있음', r1.legsCollapsed);
+  ok('복사·인쇄 버튼이 구간 상세표보다 먼저 배치됨', r1.copyBeforeTable);
   ok('직선거리 기준 안내 문구가 결과 화면에 표시됨',
-    r1.warn.includes('직선거리 기준 추천이며 실제 자동차 최단경로와 다를 수 있습니다'));
+    r1.warn.includes('실제 자동차 최단경로와 다를 수 있습니다'));
   ok('주행시간을 계산하지 않는다는 안내가 있음', r1.warn.includes('소요시간도 계산하지 않습니다'));
+  ok('결과 화면 글자 크기 위계 — 총거리가 제목보다 큼', await page.evaluate(() => {
+    const v = parseFloat(getComputedStyle(document.querySelector('#resultTotal')).fontSize);
+    const h = parseFloat(getComputedStyle(document.querySelector('#h-result')).fontSize);
+    return v > h;
+  }));
 
   // 결과가 독립 DP와 일치하는지 (실제 UI 경로 전체를 통과한 값)
   const uiCheck = await page.evaluate(() => ({
@@ -379,12 +419,12 @@ try {
   ok('미복귀 결과도 독립 DP와 일치',
     Math.abs(r2.total - heldKarpMin(uiCheck.o, uiCheck.s, false)) < 1e-9);
 
-  // 복사
+  // 복사 — 성공은 토스트로, 본문은 클립보드로 확인
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.click('#btnCopy');
-  await page.waitForFunction(() => document.querySelector('#copyMsg').textContent.length > 0);
+  await page.waitForFunction(() => document.querySelector('#toastHost').textContent.includes('복사'));
   const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
-  ok('복사 결과 안내가 표시됨', (await page.textContent('#copyMsg')).length > 0);
+  ok('복사 성공을 토스트로 알림', (await page.textContent('#toastHost')).includes('복사했습니다'));
   ok('클립보드 본문에 방문 순서가 들어 있음',
     clip.includes('출장 방문순서 추천') && clip.includes('총 직선거리'), clip.slice(0, 60).replace(/\n/g, ' | '));
   ok('복사 본문에 직선거리 주의 문구 포함', clip.includes('직선거리 기준 추천'));
@@ -400,6 +440,8 @@ try {
   }));
   ok('인쇄 시 입력·버튼 영역은 숨겨짐', printState.hiddenSolve === 'none' && printState.copyBtn === 'none');
   ok('인쇄 시 결과 영역은 보임', printState.resultVisible !== 'none');
+  ok('인쇄 시 접힌 구간 표도 펼쳐져 출력됨', await page.evaluate(() =>
+    getComputedStyle(document.querySelector('#resultTable')).display !== 'none'));
   await page.emulateMedia({ media: 'screen' });
 
   // 출장지 1곳
@@ -421,16 +463,31 @@ try {
     const p = await c.newPage();
     await p.goto(APP);
     await p.waitForFunction(() => !!window.__CJ__);
-    ok('키 미입력 시 한국어로 안내', (await p.textContent('#sdkNote')).includes('카카오 JavaScript 키가 입력되지 않았습니다'));
+    ok('키 미입력 시 할 일을 한 문장으로 안내',
+      (await p.textContent('#sdkNote')).includes('카카오 키를 등록해 주세요'));
+    ok('안내에 ‘설정 열기’ 행동 버튼이 함께 제공됨',
+      (await p.locator('#sdkNote button').count()) === 1);
+    ok('헤더 칩도 설정이 필요함을 표시',
+      ['키 설정 필요', '로컬 실행'].includes((await p.textContent('#sdkChipText')).trim()),
+      await p.textContent('#sdkChipText'));
     await p.fill('#stopQuery', '충주경찰서');
     await p.click('#btnStopSearch');
     ok('키 없이 검색하면 안내만 표시하고 계산하지 않음',
-      (await p.textContent('#stopMsg')).includes('카카오 JavaScript 키'));
+      (await p.textContent('#stopMsg')).includes('카카오 키를 등록해 주세요'));
     ok('키 없이도 좌표 직접 입력 안내가 제공됨',
       (await p.textContent('#sdkNote')).includes('위도·경도 직접 입력'));
+
+    // 준비 체크리스트가 부족한 항목을 먼저 보여 준다
+    const ready0 = await p.textContent('#readyList');
+    ok('준비 체크리스트가 남은 할 일을 보여 줌',
+      ready0.includes('출발지 확정하기') && ready0.includes('출장지 추가하기'), ready0.replace(/\s+/g,' '));
+
     // 출발지 미확정 상태에서 계산 시도
     await p.click('#btnSolve');
-    ok('출발지 미확정 시 계산을 거부', (await p.textContent('#solveMsg')).includes('출발지가 확정되지 않았습니다'));
+    ok('출발지 미확정 시 무엇을 먼저 할지 안내',
+      (await p.textContent('#solveMsg')).includes('먼저 출발지를 정해 주세요'));
+    ok('부족한 입력으로 이동하는 버튼을 제공',
+      (await p.locator('#solveMsg button').count()) === 1);
     // 좌표 직접 입력 경로 (검색 불가 상태에서는 접힌 영역이 자동으로 펼쳐져 있어야 한다)
     ok('검색 불가 상태에서 좌표 직접 입력 영역이 자동으로 펼쳐짐',
       await p.evaluate(() => document.querySelector('#manualFold').open === true));
@@ -467,17 +524,17 @@ try {
     await p.waitForFunction(() => !!window.__CJ__);
     await p.click('#btnSettings');
     const note = await p.textContent('#originNote');
-    ok('설정 화면이 file:// 상태임을 미리 경고', note.includes('로컬 파일(file://)로 열려 있습니다'));
-    ok('경고가 좌표 직접 입력 대안을 함께 안내', note.includes('위도·경도 직접 입력'));
+    ok('설정 화면이 file:// 상태임을 미리 경고', note.includes('로컬 파일로 열려 있습니다'));
+    ok('경고가 https 주소에 올리라는 대안을 함께 안내', note.includes('https 주소에 올린 뒤'));
 
     await p.fill('#stopQuery', '충주경찰서');
     await p.click('#btnStopSearch');
     await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('로컬 파일'));
     const t = await p.textContent('#stopMsg');
     ok('file://에서 검색 실패 시 원인을 콕 집어 안내',
-      t.includes('로컬 파일에서는 카카오 장소 검색을 사용할 수 없습니다'));
-    ok('등록한 도메인이 무관함을 설명', t.includes('등록한 주소는 이 파일과 아무 관계가 없습니다'));
-    ok('해결책 3가지를 제시', t.includes('좌표 직접 입력') && t.includes('https 주소에 올리기'));
+      t.includes('로컬 파일에서는 장소 검색을 쓸 수 없습니다'));
+    ok('출처가 null 이라 등록으로 해결되지 않음을 설명', t.includes('출처를 null'));
+    ok('해결책 두 가지를 제시', t.includes('위도·경도 직접 입력') && t.includes('https'));
     ok('검색 실패 후 좌표 직접 입력 영역이 자동으로 펼쳐짐',
       await p.evaluate(() => document.querySelector('#manualFold').open === true));
     ok('오류 안내에 영어 개발자 메시지를 노출하지 않음',
@@ -502,9 +559,9 @@ try {
 
     await p.fill('#stopQuery', '충주경찰서');
     await p.click('#btnStopSearch');
-    await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('오류'));
+    await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('거부'));
     const t = await p.textContent('#stopMsg');
-    ok('https에서 검색 API 오류를 한국어로 안내', t.includes('검색 중 오류가 발생했습니다'));
+    ok('https에서 검색 API 오류를 한국어로 안내', t.includes('카카오가 검색 요청을 거부했습니다'));
     ok('오류 안내에 현재 주소를 그대로 표시', t.includes('https://example.go.kr'));
     ok('오류 안내에 도메인·캐시·쿼터 점검 항목 포함',
       t.includes('사이트 도메인') && t.includes('시크릿 창') && t.includes('쿼터'));
@@ -521,7 +578,7 @@ try {
     await p.click('#btnStopSearch');
     await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('검색 결과가 없습니다'));
     ok('결과 없음을 한국어로 안내하고 대안을 제시',
-      (await p.textContent('#stopMsg')).includes('띄어쓰기'));
+      (await p.textContent('#stopMsg')).includes('줄여서 검색'));
     // 주소 검색 모드
     await p.click('#sModeAddress');
     await p.fill('#stopQuery', '중원대로 3324');
@@ -556,28 +613,136 @@ try {
   }
 
   /* ---------------- 반응형 ---------------- */
-  section('반응형 레이아웃');
-  {
-    const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  section('반응형 레이아웃 (결과 화면까지 채운 상태로 측정)');
+  for (const [w, label] of [[375, '모바일 375px'], [390, '모바일 390px'], [430, '모바일 430px'],
+                            [768, '태블릿 768px'], [1280, '데스크톱 1280px']]) {
+    const c = await browser.newContext({ viewport: { width: w, height: 900 } });
     const p = await c.newPage();
+    p.on('pageerror', e => { fail++; failures.push('pageerror: ' + e.message); });
     await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'normal' });
     await p.goto(APP);
     await p.waitForFunction(() => !!window.__CJ__);
-    const overflow = await p.evaluate(() =>
+
+    // 결과 표까지 그려진 상태라야 실제 가로폭 문제를 잡을 수 있다
+    await p.fill('#originQuery', '충주시청');
+    await p.click('#btnOriginSearch');
+    await p.waitForSelector('#originResults .item');
+    await p.locator('#originResults .item', { hasText: '충주시청' }).first().locator('button').click();
+    for (const q of ['충주경찰서', '주덕읍 행정복지센터', '한국교통대학교 충주캠퍼스 산학협력관']) {
+      await p.fill('#stopQuery', q);
+      await p.click('#btnStopSearch');
+      await p.waitForSelector('#stopResults .item');
+      await p.locator('#stopResults .item').first().locator('button').click();
+    }
+    await p.click('#btnSolve');
+    await p.waitForSelector('#cardResult:not(.hidden)');
+    await p.click('#legsFold > summary');      // 구간 표를 펼친 최악 조건
+
+    const ov = await p.evaluate(() =>
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    ok('모바일 폭(390px)에서 가로 스크롤이 생기지 않음', overflow <= 1, '초과 ' + overflow + 'px');
+    ok(`${label} — 가로 스크롤 없음 (긴 장소명·구간표 펼친 상태)`, ov <= 1, '초과 ' + ov + 'px');
     await c.close();
   }
+
+  /* ---------------- 접근성 ---------------- */
+  section('접근성');
   {
-    const c = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const c = await browser.newContext();
     const p = await c.newPage();
     await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'normal' });
     await p.goto(APP);
     await p.waitForFunction(() => !!window.__CJ__);
-    const overflow = await p.evaluate(() =>
-      document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    ok('PC 폭(1280px)에서 가로 스크롤이 생기지 않음', overflow <= 1, '초과 ' + overflow + 'px');
+
+    ok('모든 입력창에 접근 가능한 이름이 있음', await p.evaluate(() =>
+      [...document.querySelectorAll('input, select')].every(i =>
+        i.labels?.length || i.getAttribute('aria-label') || i.closest('label'))));
+
+    ok('모든 버튼에 읽을 수 있는 이름이 있음', await p.evaluate(() =>
+      [...document.querySelectorAll('button')].every(b =>
+        (b.textContent || '').trim() || b.getAttribute('aria-label'))));
+
+    ok('버튼·입력의 터치 영역이 44px 이상', await p.evaluate(() => {
+      const small = [...document.querySelectorAll('button, input[type=text], input[type=password]')]
+        .filter(e => e.offsetParent !== null && !e.closest('.seg, .chips, .sm'))
+        .filter(e => e.getBoundingClientRect().height < 44);
+      return small.length === 0;
+    }));
+
+    ok('상태 영역에 aria-live 가 지정되어 있음', await p.evaluate(() =>
+      ['#sdkNote', '#stopMsg', '#originMsg', '#solveMsg', '#sdkChip']
+        .every(s => document.querySelector(s).hasAttribute('aria-live'))));
+
+    // 키보드만으로 검색 → 등록
+    await p.focus('#stopQuery');
+    await p.keyboard.type('충주경찰서');
+    await p.keyboard.press('Enter');
+    await p.waitForSelector('#stopResults .item');
+    ok('Enter 키로 검색 실행', (await p.locator('#stopResults .item').count()) > 0);
+    await p.locator('#stopResults .item').first().locator('button').focus();
+    await p.keyboard.press('Enter');
+    ok('키보드만으로 출장지 등록', await p.evaluate(() => window.__CJ__.state.stops.length === 1));
+    await p.locator('#stopList ul.stops li button').first().focus();
+    await p.keyboard.press('Enter');
+    ok('키보드만으로 출장지 삭제', await p.evaluate(() => window.__CJ__.state.stops.length === 0));
+
+    // 설정 패널 Esc 닫기 + 포커스 복귀
+    await p.click('#btnSettings');
+    ok('설정이 열리면 aria-expanded=true',
+      (await p.getAttribute('#btnSettings', 'aria-expanded')) === 'true');
+    await p.keyboard.press('Escape');
+    ok('Esc 로 설정이 닫힘', await p.evaluate(() => document.querySelector('#cardSettings').hidden === true));
+    ok('닫은 뒤 포커스가 설정 버튼으로 돌아옴',
+      await p.evaluate(() => document.activeElement.id === 'btnSettings'));
+
+    ok('reduced-motion 설정을 존중하는 규칙이 있음', await p.evaluate(() =>
+      document.querySelector('style').textContent.includes('prefers-reduced-motion')));
     await c.close();
+  }
+
+  /* ---------------- GitHub Pages 진입 경로 ---------------- */
+  section('GitHub Pages 진입 경로 (/cj-trip-order/ 하위 경로)');
+  {
+    const srvRoot = path.join(HERE, '..');
+    const server = http.createServer((req, res) => {
+      let u = decodeURIComponent(req.url.split('?')[0]);
+      if (u.startsWith('/cj-trip-order')) u = u.slice('/cj-trip-order'.length);
+      if (u === '' || u === '/') u = '/index.html';
+      const f = path.join(srvRoot, u);
+      if (!f.startsWith(srvRoot) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) {
+        res.writeHead(404); return res.end('nf');
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(f));
+    });
+    await new Promise(r => server.listen(8123, r));
+    const c = await browser.newContext();
+    const p = await c.newPage();
+    await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'normal' });
+
+    await p.goto('http://127.0.0.1:8123/cj-trip-order/');
+    await p.waitForFunction(() => !!window.__CJ__, null, { timeout: 10000 });
+    ok('루트 주소로 들어가면 프로그램으로 이동', p.url().includes('%EC%B6%9C%EC%9E%A5'), p.url());
+    ok('이동 후 제목이 올바름', (await p.title()) === '출장 방문순서 추천기');
+    ok('하위 경로에서도 등록할 주소를 정확히 안내', await p.evaluate(() => {
+      document.querySelector('#btnSettings').click();
+      return document.querySelector('#originNote').textContent.includes('http://127.0.0.1:8123');
+    }));
+
+    // 직접 링크 + 새로고침
+    await p.goto('http://127.0.0.1:8123/cj-trip-order/%EC%B6%9C%EC%9E%A5%EB%B0%A9%EB%AC%B8%EC%88%9C%EC%84%9C%EC%B6%94%EC%B2%9C.html');
+    await p.waitForFunction(() => !!window.__CJ__);
+    ok('프로그램 직접 링크가 동작', (await p.textContent('#stopCounter')) === '0곳 등록');
+    await p.reload();
+    await p.waitForFunction(() => !!window.__CJ__);
+    ok('새로고침해도 정상 동작', (await p.textContent('#stopCounter')) === '0곳 등록');
+
+    const src = fs.readFileSync(APP_PATH, 'utf8');
+    ok('저장소 파일에 카카오 키가 하드코딩되어 있지 않음',
+      !/appkey\s*[:=]\s*["'][A-Za-z0-9]{20,}["']/.test(src) &&
+      !/[0-9a-f]{32}/.test(src.replace(/%[0-9A-F]{2}/g, '')));
+
+    await c.close();
+    server.close();
   }
 
 } finally {
