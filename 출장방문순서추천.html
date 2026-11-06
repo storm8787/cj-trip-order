@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>출장 방문순서 추천기</title>
+<style>
+  :root{
+    --bg:#f4f6f9;
+    --card:#ffffff;
+    --ink:#1b2430;
+    --ink-sub:#5a6676;
+    --line:#d8dee7;
+    --line-soft:#e8ecf2;
+    --brand:#1d4e89;
+    --brand-dark:#163c69;
+    --brand-soft:#eaf1f9;
+    --ok:#1b6e3c;
+    --ok-soft:#e8f5ec;
+    --warn:#8a5a00;
+    --warn-soft:#fdf3e0;
+    --err:#a32020;
+    --err-soft:#fdecec;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Malgun Gothic","맑은 고딕",-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    font-size:15px;
+    line-height:1.6;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1040px;margin:0 auto;padding:20px 16px 56px}
+
+  /* ── 헤더 ── */
+  header.top{
+    background:var(--brand);
+    color:#fff;
+    border-radius:var(--radius);
+    padding:18px 20px;
+    display:flex;
+    gap:16px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+  }
+  header.top h1{margin:0;font-size:22px;letter-spacing:-0.3px}
+  header.top .sub{margin:4px 0 0;font-size:13.5px;color:#d7e4f2}
+  header.top .grow{flex:1 1 320px;min-width:260px}
+
+  /* ── 카드 ── */
+  section.card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:18px 20px;
+    margin-top:16px;
+  }
+  section.card > h2{
+    margin:0 0 4px;
+    font-size:16.5px;
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  }
+  .step{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:23px;height:23px;border-radius:50%;
+    background:var(--brand);color:#fff;font-size:13px;font-weight:700;
+    flex:none;
+  }
+  .hint{color:var(--ink-sub);font-size:13.5px;margin:0 0 12px}
+
+  /* ── 폼 요소 ── */
+  label{font-size:13.5px;color:var(--ink-sub)}
+  input[type=text],input[type=password],input[type=number],select{
+    font:inherit;color:inherit;
+    padding:9px 11px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    min-width:0;
+  }
+  input:focus,select:focus,button:focus-visible{
+    outline:2px solid #2f7fd4;outline-offset:1px;
+  }
+  button{
+    font:inherit;
+    padding:9px 15px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  button:hover{background:#f3f6fa}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700}
+  button.primary:hover{background:var(--brand-dark)}
+  button.ghost{background:transparent;border-color:transparent;color:var(--brand);padding:6px 8px;text-decoration:underline}
+  button.ghost:hover{background:var(--brand-soft)}
+  button.danger{border-color:#e3b9b9;color:var(--err);background:#fff}
+  button.danger:hover{background:var(--err-soft)}
+  button.big{padding:13px 20px;font-size:16px;width:100%}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .searchbar{display:flex;gap:8px;flex-wrap:wrap}
+  .searchbar input[type=text]{flex:1 1 240px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg button{border:0;border-radius:0;padding:8px 13px;font-size:13.5px;background:#fff}
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button[aria-pressed=true]{background:var(--brand-soft);color:var(--brand-dark);font-weight:700}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .chips button{padding:5px 11px;font-size:13px;border-radius:999px;background:#fff}
+  .checkline{display:flex;gap:9px;align-items:flex-start;cursor:pointer;font-size:15px;color:var(--ink)}
+  .checkline input{margin:5px 0 0;width:17px;height:17px;flex:none}
+  .checkline .d{display:block;font-size:13px;color:var(--ink-sub)}
+
+  /* ── 알림 ── */
+  .note{border-radius:8px;padding:11px 13px;font-size:13.5px;margin-top:10px;border:1px solid}
+  .note.info{background:var(--brand-soft);border-color:#c6d9ee;color:#153a62}
+  .note.ok{background:var(--ok-soft);border-color:#bfe0cb;color:#15532e}
+  .note.warn{background:var(--warn-soft);border-color:#edd6a8;color:#6d4700}
+  .note.err{background:var(--err-soft);border-color:#eec3c3;color:#7f1d1d}
+  .note b{display:block;margin-bottom:3px}
+  .note ol,.note ul{margin:6px 0 0;padding-left:20px}
+  .note li{margin:2px 0}
+  .note code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:12.5px;word-break:break-all}
+  .hidden{display:none !important}
+
+  /* ── 검색 결과 ── */
+  .results{margin-top:12px;border:1px solid var(--line-soft);border-radius:8px;max-height:330px;overflow:auto}
+  .results .item{
+    display:flex;gap:12px;align-items:center;justify-content:space-between;
+    padding:11px 13px;border-bottom:1px solid var(--line-soft);
+  }
+  .results .item:last-child{border-bottom:0}
+  .results .item:nth-child(even){background:#fafbfd}
+  .results .nm{font-weight:700;font-size:14.5px}
+  .results .nm .cat{font-weight:400;color:var(--ink-sub);font-size:12.5px;margin-left:6px}
+  .results .ad{font-size:13px;color:var(--ink-sub);margin-top:2px}
+  .results .ad span.tag{display:inline-block;min-width:34px;color:#8a95a3}
+  .results .meta{min-width:0}
+  .results .act{flex:none}
+  .results .more{padding:10px;text-align:center}
+
+  /* ── 등록 목록 ── */
+  ol.stops{list-style:none;margin:0;padding:0}
+  ol.stops li{
+    display:flex;gap:12px;align-items:center;
+    padding:11px 12px;border:1px solid var(--line-soft);border-radius:8px;margin-bottom:8px;background:#fff;
+  }
+  ol.stops .no{
+    flex:none;width:26px;height:26px;border-radius:50%;
+    background:#eef2f7;color:var(--ink-sub);
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+  }
+  ol.stops .body{flex:1 1 auto;min-width:0}
+  ol.stops .nm{font-weight:700;font-size:14.5px}
+  ol.stops .ad{font-size:13px;color:var(--ink-sub)}
+  ol.stops .src{font-size:12px;color:#8a95a3;margin-top:1px}
+  .empty{color:var(--ink-sub);font-size:13.5px;padding:14px;border:1px dashed var(--line);border-radius:8px;text-align:center}
+  .counter{font-size:13px;color:var(--ink-sub);font-weight:400;margin-left:auto}
+
+  /* ── 출발지 확정 표시 ── */
+  .fixed{
+    display:flex;gap:12px;align-items:center;
+    background:var(--ok-soft);border:1px solid #bfe0cb;border-radius:8px;padding:11px 13px;
+  }
+  .fixed .ic{flex:none;font-weight:700;color:var(--ok)}
+  .fixed .body{flex:1 1 auto;min-width:0}
+
+  /* ── 결과 ── */
+  .flow{
+    display:flex;flex-wrap:wrap;gap:7px;align-items:center;
+    background:#fff;border:1px solid var(--line-soft);border-radius:8px;padding:14px;
+  }
+  .flow .node{
+    background:var(--brand-soft);border:1px solid #c6d9ee;color:var(--brand-dark);
+    border-radius:999px;padding:6px 13px;font-size:14px;font-weight:700;
+  }
+  .flow .node.start{background:var(--brand);border-color:var(--brand);color:#fff}
+  .flow .node.last{background:#fff}
+  .flow .arw{color:#8a95a3;font-size:15px}
+  .sum{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .sum .box{
+    flex:1 1 150px;border:1px solid var(--line-soft);border-radius:8px;padding:11px 13px;background:#fafbfd;
+  }
+  .sum .k{font-size:12.5px;color:var(--ink-sub)}
+  .sum .v{font-size:19px;font-weight:700;margin-top:2px}
+  table.legs{width:100%;border-collapse:collapse;margin-top:14px;font-size:14px}
+  table.legs th,table.legs td{border-bottom:1px solid var(--line-soft);padding:9px 8px;text-align:left;vertical-align:top}
+  table.legs th{background:#f6f8fb;font-size:13px;color:var(--ink-sub);font-weight:700;white-space:nowrap}
+  table.legs td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  table.legs td.idx{text-align:center;color:var(--ink-sub);width:34px}
+  table.legs tr.total td{font-weight:700;border-top:2px solid var(--line);background:#f6f8fb}
+  table.legs a{color:var(--brand);font-size:12.5px;white-space:nowrap}
+
+  details.fold{margin-top:12px;border:1px solid var(--line-soft);border-radius:8px;background:#fafbfd}
+  details.fold > summary{cursor:pointer;padding:10px 13px;font-size:13.5px;color:var(--brand-dark);font-weight:700}
+  details.fold > div{padding:0 13px 13px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px}
+  .fld{display:flex;flex-direction:column;gap:4px}
+  .fld input{width:100%}
+  footer.foot{margin-top:22px;font-size:12.5px;color:var(--ink-sub);text-align:center;line-height:1.8}
+
+  @media (max-width:560px){
+    .wrap{padding:12px 10px 40px}
+    section.card{padding:15px 14px}
+    header.top{padding:15px 16px}
+    header.top h1{font-size:19px}
+    .results .item{flex-wrap:wrap}
+    .results .act{width:100%}
+    .results .act button{width:100%}
+  }
+
+  /* ── 인쇄 ── */
+  @media print{
+    body{background:#fff;font-size:12pt}
+    .wrap{max-width:none;padding:0}
+    .no-print{display:none !important}
+    header.top{background:#fff;color:#000;border:0;border-bottom:2px solid #000;border-radius:0;padding:0 0 8px;margin-bottom:12px}
+    header.top .sub{color:#000}
+    section.card{border:0;padding:0;margin:0 0 10px;break-inside:avoid}
+    .flow .node{background:#fff !important;color:#000 !important;border:1px solid #000 !important}
+    .note{border:1px solid #000;background:#fff;color:#000}
+    .sum .box{background:#fff}
+    table.legs a{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="grow">
+      <h1>출장 방문순서 추천기</h1>
+      <p class="sub">출발지와 출장지를 검색해 등록하면, 직선거리 합계가 가장 짧은 방문 순서를 추천합니다. 출장지는 최대 8곳입니다.</p>
+    </div>
+    <div class="row no-print">
+      <button id="btnSettings" type="button">설정</button>
+    </div>
+  </header>
+
+  <!-- ══════════ 설정 ══════════ -->
+  <section class="card no-print" id="cardSettings" hidden>
+    <h2>설정 · 카카오 JavaScript 키</h2>
+    <p class="hint">장소 검색에는 카카오 지도 JavaScript 키가 필요합니다. 키는 무료로 발급받을 수 있으며, 발급 방법은 README 파일에 정리되어 있습니다.</p>
+    <div class="searchbar">
+      <input type="password" id="apiKey" placeholder="카카오 JavaScript 키 (32자리 영문·숫자)" autocomplete="off" spellcheck="false">
+      <button type="button" id="btnKeyShow">보기</button>
+      <button type="button" class="primary" id="btnKeyApply">적용</button>
+    </div>
+    <div style="margin-top:12px">
+      <label class="checkline">
+        <input type="checkbox" id="chkSaveKey">
+        <span>이 PC에 키를 저장합니다
+          <span class="d">체크하면 이 브라우저에만 저장되어 다음 실행 때 자동으로 입력됩니다. 공용 PC에서는 체크하지 마세요.</span>
+        </span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="danger" id="btnKeyClear">저장된 키 삭제</button>
+    </div>
+    <div class="note warn" style="margin-top:14px">
+      <b>JavaScript 키 취급 시 주의</b>
+      JavaScript 키는 브라우저가 직접 사용하는 값이라 개발자도구·소스보기로 누구나 볼 수 있습니다. 비밀값으로 취급할 수 없으므로 다음을 꼭 지켜 주세요.
+      <ul>
+        <li>카카오 개발자 사이트에서 <b>사용할 도메인만</b> 등록해 두면, 등록되지 않은 사이트에서는 그 키를 쓸 수 없습니다.</li>
+        <li>키가 외부에 퍼지면 <b>내 앱의 일일·월간 무료 사용량</b>이 남에게 소모되어 업무 중 검색이 막힐 수 있습니다.</li>
+        <li>사용량이 비정상적으로 늘면 개발자 사이트에서 키를 재발급(교체)하세요.</li>
+        <li>REST API 키는 이 프로그램에서 사용하지 않습니다. 절대 입력하거나 파일에 적어 두지 마세요.</li>
+      </ul>
+    </div>
+    <div class="note info">
+      <b>참고 · 사용량</b>
+      무료 사용량(쿼터)은 카카오 정책에 따라 바뀔 수 있습니다. 현재 내 앱에 적용된 값은 카카오 개발자 사이트의 내 애플리케이션 → 쿼터 화면에서 직접 확인하세요. 일반적인 출장 계획 용도(1회에 검색 몇 건)로는 무료 범위를 넘기기 어렵습니다.
+    </div>
+  </section>
+
+  <!-- 전역 상태 알림 -->
+  <div id="sdkNote" class="note info no-print" style="margin-top:16px">준비 중입니다…</div>
+
+  <!-- ══════════ 1. 출발지 ══════════ -->
+  <section class="card">
+    <h2><span class="step">1</span> 출발지</h2>
+    <p class="hint">기본값은 충주시청입니다. 아래 검색 결과에서 정확한 위치를 선택하면 출발지가 확정됩니다. 다른 곳에서 출발한다면 읍면동 행정복지센터, 임의 장소, 도로명주소로 바꿀 수 있습니다.</p>
+
+    <div id="originFixed" class="fixed hidden">
+      <span class="ic">확정</span>
+      <div class="body">
+        <div class="nm" id="originName"></div>
+        <div class="ad" id="originAddr" style="font-size:13px;color:var(--ink-sub)"></div>
+        <div class="src" id="originSrc" style="font-size:12px;color:#8a95a3"></div>
+      </div>
+      <button type="button" class="ghost no-print" id="btnOriginReset">변경</button>
+    </div>
+
+    <div id="originPicker">
+      <div class="row" style="margin-bottom:8px">
+        <div class="seg" role="group" aria-label="출발지 검색 방식">
+          <button type="button" id="oModeKeyword" aria-pressed="true">장소·건물명</button>
+          <button type="button" id="oModeAddress" aria-pressed="false">주소</button>
+        </div>
+      </div>
+      <div class="searchbar">
+        <input type="text" id="originQuery" value="충주시청" placeholder="예) 충주시청, 수안보면 행정복지센터">
+        <button type="button" class="primary" id="btnOriginSearch">검색</button>
+      </div>
+      <div class="chips">
+        <button type="button" class="o-chip" data-q="충주시청">충주시청</button>
+        <button type="button" class="o-chip" data-q="충주시청 제2청사">충주시청 제2청사</button>
+        <button type="button" id="btnOriginDong">읍면동 행정복지센터…</button>
+      </div>
+      <div class="row hidden" id="originDongBox" style="margin-top:10px">
+        <select id="originDong" aria-label="읍면동 선택"></select>
+        <button type="button" id="btnOriginDongGo">검색어로 넣기</button>
+      </div>
+      <div id="originResults" class="results hidden"></div>
+      <div id="originMsg"></div>
+    </div>
+  </section>
+
+  <!-- ══════════ 2. 출장지 ══════════ -->
+  <section class="card">
+    <h2><span class="step">2</span> 출장지 추가 <span class="counter" id="stopCounter">0 / 8</span></h2>
+    <p class="hint">충주시 안의 관공서·기업체·식당·상가·도로명주소 등 어디든 자유롭게 검색할 수 있습니다. 같은 이름의 장소가 여러 개면 주소를 비교해서 선택하세요.</p>
+
+    <div class="row" style="margin-bottom:8px">
+      <div class="seg" role="group" aria-label="출장지 검색 방식">
+        <button type="button" id="sModeKeyword" aria-pressed="true">장소·건물명</button>
+        <button type="button" id="sModeAddress" aria-pressed="false">주소</button>
+      </div>
+    </div>
+    <div class="searchbar">
+      <input type="text" id="stopQuery" placeholder="예) 충주경찰서, 충주세무서, 서충주신도시, 충주시 으뜸로 21">
+      <button type="button" class="primary" id="btnStopSearch">검색</button>
+    </div>
+    <div class="chips">
+      <button type="button" id="btnStopDong">읍면동 행정복지센터…</button>
+    </div>
+    <div class="row hidden" id="stopDongBox" style="margin-top:10px">
+      <select id="stopDong" aria-label="읍면동 선택"></select>
+      <button type="button" id="btnStopDongGo">검색어로 넣기</button>
+    </div>
+    <div id="stopResults" class="results hidden"></div>
+    <div id="stopMsg"></div>
+
+    <details class="fold no-print" id="manualFold">
+      <summary>장소 검색이 안 될 때 — 위도·경도 직접 입력</summary>
+      <div>
+        <p class="hint" style="margin-top:4px">카카오맵(map.kakao.com)에서 장소를 찾아 지도를 우클릭하면 좌표를 확인할 수 있습니다. 확인한 값을 그대로 입력하세요. 이 프로그램은 좌표를 추측하거나 임의로 만들어 내지 않습니다.</p>
+        <div class="grid2">
+          <div class="fld"><label for="mName">장소 이름</label><input type="text" id="mName" placeholder="예) 충주경찰서"></div>
+          <div class="fld"><label for="mLat">위도 (latitude)</label><input type="number" id="mLat" step="0.000001" placeholder="예) 36.991"></div>
+          <div class="fld"><label for="mLng">경도 (longitude)</label><input type="number" id="mLng" step="0.000001" placeholder="예) 127.926"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button type="button" id="btnManualStop">출장지로 추가</button>
+          <button type="button" id="btnManualOrigin">출발지로 지정</button>
+        </div>
+        <div id="manualMsg"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ══════════ 3. 등록 목록 ══════════ -->
+  <section class="card">
+    <h2><span class="step">3</span> 등록된 출장지</h2>
+    <div id="stopList"></div>
+    <div class="row no-print" id="stopListTools" style="margin-top:4px"></div>
+  </section>
+
+  <!-- ══════════ 4. 계산 ══════════ -->
+  <section class="card no-print">
+    <h2><span class="step">4</span> 복귀 여부 및 추천</h2>
+    <label class="checkline" style="margin-bottom:14px">
+      <input type="checkbox" id="chkReturn" checked>
+      <span>출발지로 복귀합니다
+        <span class="d">체크를 해제하면 마지막 출장지에서 일정이 끝나는 것으로 계산합니다. 체크 여부에 따라 추천 순서가 달라질 수 있습니다.</span>
+      </span>
+    </label>
+    <button type="button" class="primary big" id="btnSolve">최적 방문순서 추천</button>
+    <div id="solveMsg"></div>
+  </section>
+
+  <!-- ══════════ 결과 ══════════ -->
+  <section class="card hidden" id="cardResult">
+    <h2>추천 방문순서</h2>
+    <div id="resultMeta" class="hint"></div>
+    <div class="flow" id="resultFlow"></div>
+    <div class="sum" id="resultSum"></div>
+    <div id="resultTable"></div>
+    <div class="note warn" style="margin-top:14px">
+      <b>직선거리 기준 추천이며 실제 자동차 최단경로와 다를 수 있습니다.</b>
+      두 지점을 잇는 직선거리(Haversine) 합계가 가장 짧은 순서를 계산한 결과입니다. 실제 도로·교통상황·일방통행·강이나 산 등은 반영하지 않으며, 주행시간이나 소요시간도 계산하지 않습니다. 최종 출장 계획은 카카오맵 등에서 실제 경로를 확인한 뒤 확정하세요.
+    </div>
+    <div class="row no-print" style="margin-top:14px">
+      <button type="button" class="primary" id="btnCopy">방문 순서 복사</button>
+      <button type="button" id="btnPrint">인쇄</button>
+    </div>
+    <div id="copyMsg"></div>
+  </section>
+
+  <footer class="foot">
+    충주시 출장 방문순서 추천기 · 설치 없이 HTML 파일 하나로 동작합니다 · 장소 검색은 카카오 지도 JavaScript SDK를 사용합니다
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ===========================================================================
+ * 출장 방문순서 추천기 — 단일 HTML 프로그램
+ *  - 외부 라이브러리: 카카오 지도 JavaScript SDK (services) 뿐
+ *  - 백엔드/DB/로그인/빌드 없음
+ * ======================================================================== */
+
+/* ---------------------------------------------------------------- 상수 */
+var MAX_STOPS = 8;
+var SAME_PLACE_METERS = 30;      // 이 거리 안이면 같은 장소로 간주
+var KEY_STORAGE = "cjTripOrder.kakaoJsKey";
+var SDK_TIMEOUT_MS = 15000;
+
+// 충주시 읍면동(검색어 입력을 돕기 위한 목록일 뿐이며, 좌표는 반드시 검색으로 확정합니다)
+var CHUNGJU_DONG = [
+  "주덕읍",
+  "살미면","수안보면","대소원면","신니면","노은면","앙성면",
+  "중앙탑면","금가면","동량면","산척면","엄정면","소태면",
+  "성내충인동","교현안림동","교현2동","용산동","지현동","문화동",
+  "호암직동","달천동","봉방동","칠금금릉동","연수동","목행용탄동"
+];
+
+/* ---------------------------------------------------------------- 상태 */
+var state = {
+  key: "",
+  sdk: "idle",          // idle | loading | ready | error
+  sdkError: "",
+  origin: null,         // {name, address, lat, lng, source, placeUrl}
+  stops: [],            // 위와 같은 형태의 배열
+  result: null,
+  originMode: "keyword",
+  stopMode: "keyword"
+};
+
+/* ---------------------------------------------------------------- 도우미 */
+function $(id){ return document.getElementById(id); }
+function el(tag, cls, text){
+  var n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(text != null) n.textContent = text;
+  return n;
+}
+function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
+function show(node){ node.classList.remove("hidden"); }
+function hide(node){ node.classList.add("hidden"); }
+
+/** 알림 영역에 한국어 메시지를 출력한다. body는 DOM 노드 배열도 허용. */
+function msg(target, level, title, body){
+  var box = typeof target === "string" ? $(target) : target;
+  clear(box);
+  if(!title && !body){ box.className = ""; return; }
+  box.className = "note " + level;
+  if(title){ box.appendChild(el("b", null, title)); }
+  if(typeof body === "string"){
+    box.appendChild(document.createTextNode(body));
+  }else if(Array.isArray(body)){
+    body.forEach(function(n){ box.appendChild(n); });
+  }else if(body){
+    box.appendChild(body);
+  }
+}
+function list(items){
+  var ul = el("ul");
+  items.forEach(function(t){
+    var li = el("li");
+    li.innerHTML = t;   // 내부에서 생성한 고정 문구만 전달한다
+    ul.appendChild(li);
+  });
+  return ul;
+}
+
+/* ---------------------------------------------------------------- 거리 계산 */
+/** 두 지점 사이의 대권(직선) 거리 — Haversine, 단위 km */
+function haversineKm(a, b){
+  var R = 6371.0088;                       // 지구 평균 반지름 (km)
+  var rad = Math.PI / 180;
+  var dLat = (b.lat - a.lat) * rad;
+  var dLng = (b.lng - a.lng) * rad;
+  var s = Math.sin(dLat/2)*Math.sin(dLat/2)
+        + Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dLng/2)*Math.sin(dLng/2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+function fmtKm(km){
+  if(km < 1) return Math.round(km*1000) + " m";
+  return (Math.round(km*100)/100).toFixed(2) + " km";
+}
+
+/* ---------------------------------------------------------------- 최적화 */
+/**
+ * 가능한 모든 방문 순서를 전수 비교해 직선거리 합계가 최소인 순서를 찾는다.
+ * 출발지는 고정. 출장지 n <= 8 이므로 최대 8! = 40,320 가지.
+ *
+ * @param {{lat:number,lng:number}} origin
+ * @param {Array<{lat:number,lng:number}>} stops
+ * @param {boolean} returnToStart
+ * @returns {{order:number[], legs:number[], total:number, evaluated:number}}
+ */
+function solveBestOrder(origin, stops, returnToStart){
+  var n = stops.length;
+  if(n === 0) throw new Error("EMPTY");
+
+  // 거리행렬: 0 = 출발지, 1..n = 출장지
+  var pts = [origin].concat(stops);
+  var D = [];
+  for(var i=0;i<=n;i++){
+    D[i] = [];
+    for(var j=0;j<=n;j++){
+      D[i][j] = (i === j) ? 0 : haversineKm(pts[i], pts[j]);
+    }
+  }
+
+  var used = new Array(n).fill(false);
+  var cur = [];
+  var best = null, bestCost = Infinity, evaluated = 0;
+
+  function walk(prev, cost){
+    if(cur.length === n){
+      evaluated++;
+      var total = cost + (returnToStart ? D[prev][0] : 0);
+      if(total < bestCost - 1e-12){
+        bestCost = total;
+        best = cur.slice();
+      }
+      return;
+    }
+    for(var k=0;k<n;k++){
+      if(used[k]) continue;
+      used[k] = true;
+      cur.push(k);
+      walk(k+1, cost + D[prev][k+1]);
+      cur.pop();
+      used[k] = false;
+    }
+  }
+  walk(0, 0);
+
+  // 구간 거리 재구성
+  var legs = [], prev = 0;
+  for(var t=0;t<best.length;t++){
+    legs.push(D[prev][best[t]+1]);
+    prev = best[t]+1;
+  }
+  if(returnToStart) legs.push(D[prev][0]);
+
+  var sum = legs.reduce(function(a,b){ return a+b; }, 0);
+  return { order: best, legs: legs, total: sum, evaluated: evaluated };
+}
+
+/* ---------------------------------------------------------------- 중복 판정 */
+function samePlace(a, b){
+  if(!a || !b) return false;
+  if(a.placeId && b.placeId && a.placeId === b.placeId) return true;
+  var meters = haversineKm(a, b) * 1000;
+  if(meters <= SAME_PLACE_METERS) return true;
+  var na = (a.name||"").replace(/\s+/g,"");
+  var nb = (b.name||"").replace(/\s+/g,"");
+  var aa = (a.address||"").replace(/\s+/g,"");
+  var ab = (b.address||"").replace(/\s+/g,"");
+  return !!na && na === nb && !!aa && aa === ab;
+}
+
+/* ---------------------------------------------------------------- 카카오 SDK */
+function kakaoReady(){
+  return !!(window.kakao && window.kakao.maps && window.kakao.maps.services);
+}
+
+function loadKakaoSdk(key){
+  return new Promise(function(resolve, reject){
+    if(kakaoReady()) return resolve("already");
+    if(!key) return reject({ code:"NO_KEY" });
+    if(navigator.onLine === false) return reject({ code:"OFFLINE" });
+
+    var done = false;
+    var timer = setTimeout(function(){
+      if(done) return; done = true;
+      reject({ code:"TIMEOUT" });
+    }, SDK_TIMEOUT_MS);
+
+    var s = document.createElement("script");
+    s.async = true;
+    s.src = "https://dapi.kakao.com/v2/maps/sdk.js?appkey=" +
+            encodeURIComponent(key) + "&libraries=services&autoload=false";
+    s.onerror = function(){
+      if(done) return; done = true;
+      clearTimeout(timer);
+      reject({ code:"SCRIPT_ERROR" });
+    };
+    s.onload = function(){
+      try{
+        window.kakao.maps.load(function(){
+          if(done) return; done = true;
+          clearTimeout(timer);
+          if(kakaoReady()) resolve("ok");
+          else reject({ code:"NO_SERVICES" });
+        });
+      }catch(e){
+        if(done) return; done = true;
+        clearTimeout(timer);
+        reject({ code:"NO_SERVICES" });
+      }
+    };
+    document.head.appendChild(s);
+  });
+}
+
+/** keywordSearch / addressSearch 콜백 인자 순서를 방어적으로 정규화한다. */
+function normalizeCb(a, b){
+  var isStatus = function(v){ return typeof v === "string"; };
+  if(isStatus(a)) return { status:a, data: Array.isArray(b) ? b : [] };
+  if(isStatus(b)) return { status:b, data: Array.isArray(a) ? a : [] };
+  return { status:"ERROR", data:[] };
+}
+
+function statusOf(name){
+  try{
+    var S = window.kakao.maps.services.Status;
+    return S && S[name] ? S[name] : name;
+  }catch(e){ return name; }
+}
+
+/** 장소명(키워드) 검색 */
+function searchKeyword(query){
+  return new Promise(function(resolve, reject){
+    var ps;
+    try{ ps = new window.kakao.maps.services.Places(); }
+    catch(e){ return reject({ code:"SDK_BROKEN" }); }
+    var settled = false;
+    var timer = setTimeout(function(){
+      if(settled) return; settled = true;
+      reject({ code:"TIMEOUT" });
+    }, SDK_TIMEOUT_MS);
+    try{
+      ps.keywordSearch(query, function(a, b){
+        if(settled) return; settled = true;
+        clearTimeout(timer);
+        var r = normalizeCb(a, b);
+        if(r.status === statusOf("OK")) resolve(r.data.map(fromPlace));
+        else if(r.status === statusOf("ZERO_RESULT")) resolve([]);
+        else reject({ code:"API_ERROR", status:r.status });
+      });
+    }catch(e){
+      if(settled) return; settled = true;
+      clearTimeout(timer);
+      reject({ code:"SDK_BROKEN" });
+    }
+  });
+}
+
+/** 주소 검색 */
+function searchAddress(query){
+  return new Promise(function(resolve, reject){
+    var gc;
+    try{ gc = new window.kakao.maps.services.Geocoder(); }
+    catch(e){ return reject({ code:"SDK_BROKEN" }); }
+    var settled = false;
+    var timer = setTimeout(function(){
+      if(settled) return; settled = true;
+      reject({ code:"TIMEOUT" });
+    }, SDK_TIMEOUT_MS);
+    try{
+      gc.addressSearch(query, function(a, b){
+        if(settled) return; settled = true;
+        clearTimeout(timer);
+        var r = normalizeCb(a, b);
+        if(r.status === statusOf("OK")) resolve(r.data.map(fromAddress));
+        else if(r.status === statusOf("ZERO_RESULT")) resolve([]);
+        else reject({ code:"API_ERROR", status:r.status });
+      });
+    }catch(e){
+      if(settled) return; settled = true;
+      clearTimeout(timer);
+      reject({ code:"SDK_BROKEN" });
+    }
+  });
+}
+
+/* 검색 결과 → 내부 장소 객체 (좌표 없으면 null → 걸러낸다) */
+function num(v){
+  var n = parseFloat(v);
+  return (typeof n === "number" && isFinite(n)) ? n : null;
+}
+function validCoord(lat, lng){
+  // 대한민국 범위 안인지 최소한으로 검증한다
+  return lat !== null && lng !== null &&
+         lat >= 33 && lat <= 39.5 && lng >= 124 && lng <= 132;
+}
+function fromPlace(p){
+  var lat = num(p.y), lng = num(p.x);
+  if(!validCoord(lat, lng)) return null;
+  return {
+    name: p.place_name || "(이름 없음)",
+    address: p.road_address_name || p.address_name || "",
+    address2: (p.road_address_name && p.address_name) ? p.address_name : "",
+    category: p.category_group_name || "",
+    placeId: p.id || "",
+    placeUrl: p.place_url || "",
+    lat: lat, lng: lng,
+    source: "카카오 장소명 검색"
+  };
+}
+function fromAddress(a){
+  var lat = num(a.y), lng = num(a.x);
+  if(!validCoord(lat, lng)) return null;
+  var road = a.road_address ? a.road_address.address_name : "";
+  var jibun = a.address ? a.address.address_name : "";
+  var bd = (a.road_address && a.road_address.building_name) ? a.road_address.building_name : "";
+  return {
+    name: bd || road || jibun || (a.address_name || "(주소)"),
+    address: road || a.address_name || jibun || "",
+    address2: (road && jibun) ? jibun : "",
+    category: "주소",
+    placeId: "",
+    placeUrl: "",
+    lat: lat, lng: lng,
+    source: "카카오 주소 검색"
+  };
+}
+
+/* ---------------------------------------------------------------- 오류 안내 */
+function describeSdkError(e){
+  var code = (e && e.code) || "UNKNOWN";
+  var isFile = location.protocol === "file:";
+  if(code === "NO_KEY"){
+    return ["warn", "카카오 JavaScript 키가 입력되지 않았습니다",
+      "맨 위 ‘설정’ 버튼을 눌러 카카오 JavaScript 키를 입력하면 장소 검색을 쓸 수 있습니다. 키 발급 방법은 함께 배포된 README 파일을 참고하세요. 키 없이도 아래 ‘위도·경도 직접 입력’으로 방문순서 계산은 가능합니다."];
+  }
+  if(code === "OFFLINE"){
+    return ["err", "인터넷에 연결되어 있지 않습니다",
+      "장소 검색은 인터넷 연결이 필요합니다. 네트워크 연결을 확인한 뒤 ‘설정 → 적용’을 다시 누르세요."];
+  }
+  if(code === "SCRIPT_ERROR" || code === "TIMEOUT" || code === "NO_SERVICES"){
+    return ["err", "카카오 지도 SDK를 불러오지 못했습니다", [
+      document.createTextNode("아래 원인 중 하나일 가능성이 큽니다. 위에서부터 확인해 보세요."),
+      list([
+        "<b>키가 잘못되었거나 지도 제품이 꺼져 있음</b> — 카카오 개발자 사이트의 <code>JavaScript 키</code>를 복사했는지, REST API 키를 넣지 않았는지 확인하세요.",
+        "<b>도메인이 등록되지 않음</b> — 카카오 개발자 사이트 → 내 애플리케이션 → 앱 설정(플랫폼/앱 키) → <code>JavaScript 키</code>의 <code>JavaScript SDK 도메인</code>에 현재 주소를 등록해야 합니다. 현재 이 페이지의 주소는 <code>" +
+          (isFile ? "file:// (로컬 파일)" : location.origin) + "</code> 입니다." +
+          (isFile ? " 로컬 파일(<code>file://</code>)은 브라우저가 도메인을 <code>null</code>로 보내기 때문에 등록이 반영되지 않을 수 있습니다. README의 ‘로컬 파일에서 검색이 안 될 때’ 항목을 확인하세요." : ""),
+        "<b>인터넷/보안 프로그램 차단</b> — 기관 내부망, 방화벽, 백신의 웹 보호 기능이 <code>dapi.kakao.com</code> 접속을 막고 있을 수 있습니다.",
+        "<b>무료 사용량 초과</b> — 카카오 개발자 사이트의 쿼터 화면에서 당일 사용량을 확인하세요."
+      ]),
+      el("div", null, "검색이 되지 않는 동안에도 ‘위도·경도 직접 입력’을 이용하면 방문순서 계산은 그대로 사용할 수 있습니다.")
+    ]];
+  }
+  return ["err", "장소 검색을 준비하는 중 문제가 발생했습니다",
+    "잠시 후 다시 시도해 주세요. 계속 같은 증상이면 README의 ‘문제 해결’ 항목을 확인하세요."];
+}
+
+function describeSearchError(e){
+  var code = (e && e.code) || "UNKNOWN";
+  if(code === "TIMEOUT"){
+    return ["err", "검색 응답이 오지 않았습니다",
+      "인터넷 연결이 끊겼거나, 등록된 도메인이 맞지 않아 카카오 서버가 요청을 거부했을 수 있습니다. 네트워크를 확인한 뒤 다시 검색해 보세요."];
+  }
+  if(code === "API_ERROR"){
+    return ["err", "검색 중 오류가 발생했습니다", [
+      document.createTextNode("카카오 서버가 요청을 처리하지 못했습니다. 다음을 확인해 주세요."),
+      list([
+        "JavaScript 키가 올바른지, 그리고 <code>JavaScript SDK 도메인</code>에 현재 주소가 등록되어 있는지",
+        "하루 또는 월 무료 사용량(쿼터)을 넘기지 않았는지",
+        "검색어에 특수문자가 지나치게 많지 않은지"
+      ])
+    ]];
+  }
+  if(code === "SDK_BROKEN"){
+    return ["err", "검색 기능을 사용할 수 없습니다",
+      "카카오 지도 SDK가 정상적으로 준비되지 않았습니다. 페이지를 새로고침한 뒤 ‘설정 → 적용’을 다시 눌러 주세요."];
+  }
+  return ["err", "검색에 실패했습니다", "잠시 후 다시 시도해 주세요."];
+}
+
+/* ---------------------------------------------------------------- SDK 상태 UI */
+function renderSdkNote(){
+  var box = $("sdkNote");
+  // 검색을 쓸 수 없는 동안에는 좌표 직접 입력 영역을 미리 펼쳐 둔다
+  var fold = $("manualFold");
+  if(fold) fold.open = (state.sdk !== "ready" && state.sdk !== "loading");
+  if(state.sdk === "ready"){
+    msg(box, "ok", "장소 검색을 사용할 수 있습니다", "출발지와 출장지를 검색해 등록하세요.");
+    return;
+  }
+  if(state.sdk === "loading"){
+    msg(box, "info", null, "카카오 지도 SDK를 불러오는 중입니다…");
+    return;
+  }
+  if(state.sdk === "error"){
+    var d = state.sdkErrorDetail || describeSdkError({ code: state.sdkError });
+    msg(box, d[0], d[1], d[2]);
+    return;
+  }
+  var d2 = describeSdkError({ code:"NO_KEY" });
+  msg(box, d2[0], d2[1], d2[2]);
+}
+
+function applyKey(key, remember){
+  state.key = (key || "").trim();
+  if(!state.key){
+    state.sdk = "idle";
+    state.sdkErrorDetail = null;
+    renderSdkNote();
+    return Promise.resolve(false);
+  }
+  state.sdk = "loading";
+  state.sdkErrorDetail = null;
+  renderSdkNote();
+  if(remember){
+    try{ localStorage.setItem(KEY_STORAGE, state.key); }catch(e){}
+  }
+  return loadKakaoSdk(state.key).then(function(){
+    state.sdk = "ready";
+    renderSdkNote();
+    return true;
+  }, function(e){
+    state.sdk = "error";
+    state.sdkError = (e && e.code) || "UNKNOWN";
+    state.sdkErrorDetail = describeSdkError(e);
+    renderSdkNote();
+    return false;
+  });
+}
+
+/* ---------------------------------------------------------------- 검색 UI */
+var PAGE = 10;
+
+function renderResults(boxId, msgId, places, onPick){
+  var box = $(boxId);
+  clear(box);
+  show(box);
+  var shown = 0;
+
+  function addRows(){
+    var slice = places.slice(shown, shown + PAGE);
+    slice.forEach(function(p){
+      var item = el("div", "item");
+      var meta = el("div", "meta");
+      var nm = el("div", "nm");
+      nm.appendChild(document.createTextNode(p.name));
+      if(p.category) nm.appendChild(el("span", "cat", p.category));
+      meta.appendChild(nm);
+      if(p.address){
+        var ad = el("div", "ad");
+        ad.appendChild(el("span", "tag", "도로명"));
+        ad.appendChild(document.createTextNode(" " + p.address));
+        meta.appendChild(ad);
+      }
+      if(p.address2){
+        var ad2 = el("div", "ad");
+        ad2.appendChild(el("span", "tag", "지번"));
+        ad2.appendChild(document.createTextNode(" " + p.address2));
+        meta.appendChild(ad2);
+      }
+      item.appendChild(meta);
+      var act = el("div", "act");
+      var b = el("button", "primary", "선택");
+      b.type = "button";
+      b.addEventListener("click", function(){ onPick(p); });
+      act.appendChild(b);
+      item.appendChild(act);
+      box.appendChild(item);
+    });
+    shown += slice.length;
+    if(moreWrap) box.removeChild(moreWrap);
+    if(shown < places.length){
+      moreWrap = el("div", "more");
+      var mb = el("button", null, "검색 결과 더 보기 (" + (places.length - shown) + "곳 남음)");
+      mb.type = "button";
+      mb.addEventListener("click", addRows);
+      moreWrap.appendChild(mb);
+      box.appendChild(moreWrap);
+    }else{
+      moreWrap = null;
+    }
+  }
+  var moreWrap = null;
+  addRows();
+
+  msg(msgId, "info", null,
+    "검색 결과 " + places.length + "곳입니다. 주소를 비교해 정확한 위치의 ‘선택’을 누르세요.");
+}
+
+/** 검색 실행 공통 처리. mode: keyword | address (키워드 결과가 없으면 주소로 자동 재시도) */
+function runSearch(opts){
+  var query = (opts.input.value || "").trim();
+  if(!query){
+    msg(opts.msgId, "warn", "검색어를 입력해 주세요", "장소명(예: 충주경찰서) 또는 주소(예: 충주시 으뜸로 21)를 입력한 뒤 검색을 누르세요.");
+    hide($(opts.boxId));
+    return;
+  }
+  if(query.length < 2){
+    msg(opts.msgId, "warn", "검색어가 너무 짧습니다", "두 글자 이상 입력해 주세요.");
+    return;
+  }
+  if(state.sdk !== "ready"){
+    var d = state.sdkErrorDetail || describeSdkError({ code: state.key ? state.sdkError : "NO_KEY" });
+    msg(opts.msgId, d[0], d[1], d[2]);
+    return;
+  }
+
+  hide($(opts.boxId));
+  msg(opts.msgId, "info", null, "‘" + query + "’ 검색 중입니다…");
+  opts.btn.disabled = true;
+
+  var primary = opts.mode === "address" ? searchAddress : searchKeyword;
+  var secondary = opts.mode === "address" ? searchKeyword : searchAddress;
+  var usedFallback = false;
+
+  primary(query).then(function(rows){
+    if(rows.length === 0){
+      usedFallback = true;
+      return secondary(query);
+    }
+    return rows;
+  }).then(function(rows){
+    opts.btn.disabled = false;
+    var dropped = rows.filter(function(r){ return r === null; }).length;
+    var ok = rows.filter(function(r){ return r !== null; });
+
+    if(ok.length === 0){
+      msg(opts.msgId, "warn", "검색 결과가 없습니다", [
+        document.createTextNode("‘" + query + "’ 로 찾을 수 있는 장소가 없습니다. 다음을 시도해 보세요."),
+        list([
+          "띄어쓰기를 바꾸거나 줄여서 검색 (예: <code>수안보면 행정복지센터</code> → <code>수안보면사무소</code>)",
+          "검색 방식을 <b>장소·건물명</b> ↔ <b>주소</b> 로 바꿔서 검색",
+          "지역명을 함께 입력 (예: <code>충주 세무서</code>)",
+          "건물명 대신 도로명주소로 검색 (예: <code>충주시 으뜸로 21</code>)"
+        ])
+      ]);
+      return;
+    }
+    renderResults(opts.boxId, opts.msgId, ok, opts.onPick);
+    if(dropped > 0 || usedFallback){
+      var extra = $(opts.msgId);
+      if(usedFallback){
+        extra.appendChild(el("div", null,
+          opts.mode === "address"
+            ? "주소로는 결과가 없어 장소명으로 다시 검색한 결과입니다."
+            : "장소명으로는 결과가 없어 주소로 다시 검색한 결과입니다."));
+      }
+      if(dropped > 0){
+        extra.appendChild(el("div", null,
+          "좌표 정보가 없는 결과 " + dropped + "건은 거리 계산을 할 수 없어 목록에서 제외했습니다."));
+      }
+    }
+  }, function(e){
+    opts.btn.disabled = false;
+    var d = describeSearchError(e);
+    msg(opts.msgId, d[0], d[1], d[2]);
+  });
+}
+
+/* ---------------------------------------------------------------- 출발지 */
+function setOrigin(p){
+  // 이미 등록된 출장지와 같은 곳이면 거부
+  for(var i=0;i<state.stops.length;i++){
+    if(samePlace(p, state.stops[i])){
+      msg("originMsg", "err", "이미 출장지로 등록된 장소입니다",
+        "‘" + state.stops[i].name + "’은(는) 출장지 목록에 있습니다. 출발지로 지정하려면 먼저 출장지 목록에서 삭제하세요.");
+      return false;
+    }
+  }
+  state.origin = p;
+  state.result = null;
+  hide($("cardResult"));
+  renderOrigin();
+  msg("originMsg", null);
+  msg("solveMsg", null);
+  return true;
+}
+
+function renderOrigin(){
+  var fixed = $("originFixed"), picker = $("originPicker");
+  if(state.origin){
+    $("originName").textContent = state.origin.name;
+    $("originAddr").textContent = state.origin.address || "(주소 정보 없음)";
+    $("originSrc").textContent = state.origin.source +
+      " · 위도 " + state.origin.lat.toFixed(6) + ", 경도 " + state.origin.lng.toFixed(6);
+    show(fixed);
+    hide(picker);
+  }else{
+    hide(fixed);
+    show(picker);
+  }
+}
+
+/* ---------------------------------------------------------------- 출장지 */
+function addStop(p){
+  if(state.stops.length >= MAX_STOPS){
+    msg("stopMsg", "warn", "출장지는 최대 " + MAX_STOPS + "곳까지 등록할 수 있습니다",
+      "방문순서를 정확히 계산하기 위한 제한입니다. 등록된 출장지 중 하나를 삭제한 뒤 추가하세요.");
+    return false;
+  }
+  if(state.origin && samePlace(p, state.origin)){
+    msg("stopMsg", "err", "출발지와 같은 장소입니다",
+      "‘" + p.name + "’은(는) 현재 출발지로 지정되어 있어 출장지로 중복 등록할 수 없습니다.");
+    return false;
+  }
+  for(var i=0;i<state.stops.length;i++){
+    if(samePlace(p, state.stops[i])){
+      msg("stopMsg", "warn", "이미 등록된 출장지입니다",
+        "‘" + state.stops[i].name + "’" +
+        (state.stops[i].address ? " (" + state.stops[i].address + ")" : "") +
+        "이(가) 이미 목록에 있습니다. 같은 장소는 한 번만 등록됩니다.");
+      return false;
+    }
+  }
+  state.stops.push(p);
+  state.result = null;
+  hide($("cardResult"));
+  renderStops();
+  msg("stopMsg", "ok", "‘" + p.name + "’을(를) 출장지로 추가했습니다",
+    "현재 " + state.stops.length + "곳이 등록되어 있습니다." +
+    (state.stops.length < 1 ? "" : " 모두 등록했으면 아래 ‘최적 방문순서 추천’을 누르세요."));
+  msg("solveMsg", null);
+  return true;
+}
+
+function removeStop(idx){
+  var gone = state.stops.splice(idx, 1)[0];
+  state.result = null;
+  hide($("cardResult"));
+  renderStops();
+  if(gone) msg("stopMsg", "info", null, "‘" + gone.name + "’을(를) 목록에서 삭제했습니다.");
+}
+
+function renderStops(){
+  var wrap = $("stopList");
+  clear(wrap);
+  $("stopCounter").textContent = state.stops.length + " / " + MAX_STOPS;
+
+  if(state.stops.length === 0){
+    wrap.appendChild(el("div", "empty", "등록된 출장지가 없습니다. 위 2번에서 장소를 검색해 추가하세요."));
+  }else{
+    var ol = el("ol", "stops");
+    state.stops.forEach(function(p, i){
+      var li = el("li");
+      li.appendChild(el("span", "no", String(i+1)));
+      var body = el("div", "body");
+      body.appendChild(el("div", "nm", p.name));
+      body.appendChild(el("div", "ad", p.address || "(주소 정보 없음)"));
+      body.appendChild(el("div", "src",
+        p.source + " · 위도 " + p.lat.toFixed(6) + ", 경도 " + p.lng.toFixed(6)));
+      li.appendChild(body);
+      var b = el("button", "danger no-print", "삭제");
+      b.type = "button";
+      b.addEventListener("click", function(){ removeStop(i); });
+      li.appendChild(b);
+      ol.appendChild(li);
+    });
+    wrap.appendChild(ol);
+    wrap.appendChild(el("div", "hint",
+      "위 번호는 등록한 순서일 뿐이며, 추천 방문순서와는 관계가 없습니다."));
+  }
+
+  var tools = $("stopListTools");
+  clear(tools);
+  if(state.stops.length > 0){
+    var ca = el("button", "danger", "출장지 전체 삭제");
+    ca.type = "button";
+    ca.addEventListener("click", function(){
+      state.stops = [];
+      state.result = null;
+      hide($("cardResult"));
+      renderStops();
+      msg("stopMsg", "info", null, "출장지 목록을 모두 삭제했습니다.");
+    });
+    tools.appendChild(ca);
+  }
+}
+
+/* ---------------------------------------------------------------- 결과 */
+function kakaoMapLink(p, kind){
+  // 카카오맵 공식 URL 스킴 (지도 보기 / 길찾기 도착지)
+  var base = kind === "to" ? "https://map.kakao.com/link/to/" : "https://map.kakao.com/link/map/";
+  return base + encodeURIComponent(p.name) + "," + p.lat + "," + p.lng;
+}
+
+function buildPlainText(res){
+  var lines = [];
+  lines.push("[출장 방문순서 추천]");
+  lines.push("");
+  lines.push("출발: " + res.seq[0].name + (res.seq[0].address ? " (" + res.seq[0].address + ")" : ""));
+  for(var i=1;i<res.seq.length;i++){
+    var p = res.seq[i];
+    var tail = (res.returnToStart && i === res.seq.length-1) ? " [복귀]" : "";
+    lines.push(i + ". " + p.name + (p.address ? " (" + p.address + ")" : "") +
+               "  — 직전 구간 " + fmtKm(res.legs[i-1]) + tail);
+  }
+  lines.push("");
+  lines.push("방문 장소 수: 출발지 1곳 + 출장지 " + res.stopCount + "곳 (총 " + (res.stopCount+1) + "개 지점)");
+  lines.push("총 직선거리: " + fmtKm(res.total));
+  lines.push(res.returnToStart ? "복귀: 출발지로 복귀" : "복귀: 마지막 출장지에서 종료");
+  lines.push("");
+  lines.push("※ 직선거리 기준 추천이며 실제 자동차 최단경로와 다를 수 있습니다.");
+  lines.push("※ 주행시간·소요시간은 계산하지 않았습니다.");
+  return lines.join("\n");
+}
+
+function renderResult(res){
+  var card = $("cardResult");
+  show(card);
+
+  $("resultMeta").textContent =
+    "출발지 1곳 + 출장지 " + res.stopCount + "곳 · " +
+    (res.returnToStart ? "출발지로 복귀" : "마지막 출장지에서 종료") +
+    " · 가능한 방문 순서 " + res.evaluated.toLocaleString("ko-KR") + "가지를 모두 비교했습니다.";
+
+  // 순서도
+  var flow = $("resultFlow");
+  clear(flow);
+  res.seq.forEach(function(p, i){
+    if(i > 0) flow.appendChild(el("span", "arw", "→"));
+    var cls = "node" + (i === 0 ? " start" : (i === res.seq.length-1 ? " last" : ""));
+    flow.appendChild(el("span", cls, (i === 0 ? "" : i + ". ") + p.name));
+  });
+
+  // 요약
+  var sum = $("resultSum");
+  clear(sum);
+  [["전체 방문 장소 수", (res.stopCount + 1) + "개 지점"],
+   ["총 직선거리", fmtKm(res.total)],
+   ["구간 수", res.legs.length + "개 구간"],
+   ["복귀 여부", res.returnToStart ? "복귀" : "미복귀"]
+  ].forEach(function(kv){
+    var b = el("div", "box");
+    b.appendChild(el("div", "k", kv[0]));
+    b.appendChild(el("div", "v", kv[1]));
+    sum.appendChild(b);
+  });
+
+  // 구간 표
+  var tw = $("resultTable");
+  clear(tw);
+  var tbl = el("table", "legs");
+  var thead = el("thead");
+  var htr = el("tr");
+  ["순서","장소","주소","직전 구간 직선거리","누적","카카오맵"].forEach(function(h){
+    htr.appendChild(el("th", null, h));
+  });
+  thead.appendChild(htr);
+  tbl.appendChild(thead);
+
+  var tb = el("tbody");
+  var acc = 0;
+  res.seq.forEach(function(p, i){
+    var tr = el("tr");
+    tr.appendChild(el("td", "idx", i === 0 ? "출발" : String(i)));
+    var nmTd = el("td");
+    nmTd.appendChild(el("div", null, p.name));
+    if(res.returnToStart && i === res.seq.length-1){
+      nmTd.appendChild(el("div", "src", "출발지로 복귀"));
+    }
+    tr.appendChild(nmTd);
+    tr.appendChild(el("td", null, p.address || "-"));
+    if(i === 0){
+      tr.appendChild(el("td", "num", "-"));
+      tr.appendChild(el("td", "num", "-"));
+    }else{
+      acc += res.legs[i-1];
+      tr.appendChild(el("td", "num", fmtKm(res.legs[i-1])));
+      tr.appendChild(el("td", "num", fmtKm(acc)));
+    }
+    var linkTd = el("td");
+    var a = el("a", null, i === 0 ? "지도" : "길찾기");
+    a.href = kakaoMapLink(p, i === 0 ? "map" : "to");
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    linkTd.appendChild(a);
+    tr.appendChild(linkTd);
+    tb.appendChild(tr);
+  });
+  var ttr = el("tr", "total");
+  ttr.appendChild(el("td", "idx", ""));
+  ttr.appendChild(el("td", null, "총 직선거리"));
+  ttr.appendChild(el("td", null, ""));
+  ttr.appendChild(el("td", "num", ""));
+  ttr.appendChild(el("td", "num", fmtKm(res.total)));
+  ttr.appendChild(el("td", null, ""));
+  tb.appendChild(ttr);
+  tbl.appendChild(tb);
+  tw.appendChild(tbl);
+
+  var note = el("div", "hint");
+  note.style.marginTop = "8px";
+  note.textContent = "‘길찾기’ 링크는 해당 지점을 도착지로 하는 카카오맵 화면을 새 창으로 엽니다(인터넷 연결 필요). 여러 지점을 한 번에 그리는 기능은 제공하지 않습니다.";
+  tw.appendChild(note);
+}
+
+function solve(){
+  msg("copyMsg", null);
+
+  if(!state.origin){
+    msg("solveMsg", "err", "출발지가 확정되지 않았습니다",
+      "1번 항목에서 출발지를 검색한 뒤 검색 결과의 ‘선택’을 눌러 위치를 확정해 주세요. 이름만으로는 위치를 정할 수 없어 계산을 시작하지 않습니다.");
+    return;
+  }
+  if(state.stops.length === 0){
+    msg("solveMsg", "err", "등록된 출장지가 없습니다",
+      "2번 항목에서 방문할 장소를 검색해 한 곳 이상 추가해 주세요.");
+    return;
+  }
+
+  var returnToStart = $("chkReturn").checked;
+  var res;
+  try{
+    res = solveBestOrder(state.origin, state.stops, returnToStart);
+  }catch(e){
+    msg("solveMsg", "err", "방문순서를 계산하지 못했습니다",
+      "등록된 장소의 좌표를 확인한 뒤 다시 시도해 주세요.");
+    return;
+  }
+
+  // 순서 무결성 검증: 모든 출장지가 정확히 한 번씩 포함되어야 한다
+  var seen = {}, dup = false;
+  res.order.forEach(function(k){ if(seen[k]) dup = true; seen[k] = true; });
+  if(dup || res.order.length !== state.stops.length){
+    msg("solveMsg", "err", "계산 결과가 올바르지 않습니다",
+      "방문 순서에 누락 또는 중복이 발생했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
+    return;
+  }
+
+  var seq = [state.origin].concat(res.order.map(function(k){ return state.stops[k]; }));
+  if(returnToStart) seq.push(state.origin);
+
+  state.result = {
+    seq: seq,
+    legs: res.legs,
+    total: res.total,
+    stopCount: state.stops.length,
+    returnToStart: returnToStart,
+    evaluated: res.evaluated
+  };
+
+  renderResult(state.result);
+
+  if(state.stops.length === 1){
+    msg("solveMsg", "info", "출장지가 1곳이라 비교할 순서가 없습니다",
+      "거리 정보만 표시했습니다. 두 곳 이상 등록하면 방문순서를 추천해 드립니다.");
+  }else{
+    msg("solveMsg", "ok", "추천 방문순서를 계산했습니다",
+      "결과는 아래에 표시되어 있습니다.");
+  }
+  $("cardResult").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+/* ---------------------------------------------------------------- 복사 / 인쇄 */
+function copyResult(){
+  if(!state.result){ return; }
+  var text = buildPlainText(state.result);
+
+  function ok(){
+    msg("copyMsg", "ok", null, "방문 순서를 클립보드에 복사했습니다. 메일이나 문서에 붙여넣기(Ctrl+V) 하세요.");
+  }
+  function fallback(){
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "readonly");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    var done = false;
+    try{ done = document.execCommand("copy"); }catch(e){ done = false; }
+    document.body.removeChild(ta);
+    if(done) ok();
+    else {
+      var pre = el("textarea");
+      pre.value = text;
+      pre.rows = 10;
+      pre.style.width = "100%";
+      pre.style.marginTop = "8px";
+      msg("copyMsg", "warn", "자동 복사가 차단되었습니다", [
+        document.createTextNode("브라우저 보안 설정으로 자동 복사가 되지 않았습니다. 아래 내용을 직접 선택해 복사(Ctrl+A → Ctrl+C)해 주세요."),
+        pre
+      ]);
+      pre.focus(); pre.select();
+    }
+  }
+
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(ok, fallback);
+  }else{
+    fallback();
+  }
+}
+
+/* ---------------------------------------------------------------- 초기화 */
+function fillDongSelects(){
+  [$("originDong"), $("stopDong")].forEach(function(sel){
+    clear(sel);
+    CHUNGJU_DONG.forEach(function(d){
+      var o = el("option", null, d + " 행정복지센터");
+      o.value = d + " 행정복지센터";
+      sel.appendChild(o);
+    });
+  });
+}
+
+function bindSeg(aId, bId, which){
+  var a = $(aId), b = $(bId);
+  function set(mode){
+    state[which] = mode;
+    a.setAttribute("aria-pressed", mode === "keyword" ? "true" : "false");
+    b.setAttribute("aria-pressed", mode === "address" ? "true" : "false");
+  }
+  a.addEventListener("click", function(){ set("keyword"); });
+  b.addEventListener("click", function(){ set("address"); });
+}
+
+function init(){
+  fillDongSelects();
+  renderOrigin();
+  renderStops();
+
+  /* 설정 */
+  $("btnSettings").addEventListener("click", function(){
+    var c = $("cardSettings");
+    c.hidden = !c.hidden;
+    if(!c.hidden) $("apiKey").focus();
+  });
+  $("btnKeyShow").addEventListener("click", function(){
+    var i = $("apiKey");
+    i.type = i.type === "password" ? "text" : "password";
+    this.textContent = i.type === "password" ? "보기" : "숨기기";
+  });
+  $("btnKeyApply").addEventListener("click", function(){
+    var k = $("apiKey").value.trim();
+    if(!k){
+      msg("sdkNote", "warn", "키를 입력해 주세요", "카카오 개발자 사이트에서 발급한 JavaScript 키를 붙여넣으세요.");
+      return;
+    }
+    if(!/^[A-Za-z0-9]{20,64}$/.test(k)){
+      msg("sdkNote", "warn", "키 형식이 올바르지 않아 보입니다", [
+        document.createTextNode("JavaScript 키는 보통 32자리 영문·숫자입니다. 다음을 확인해 주세요."),
+        list([
+          "앞뒤 공백이나 줄바꿈이 섞이지 않았는지",
+          "<code>REST API 키</code>나 <code>네이티브 앱 키</code>를 복사한 것은 아닌지",
+          "<code>KakaoAK</code> 같은 접두어를 함께 붙여넣지 않았는지"
+        ]),
+        el("div", null, "그래도 이 값으로 시도하려면 ‘적용’을 다시 누르세요.")
+      ]);
+      // 두 번째 클릭에서는 그대로 진행
+      if(this.dataset.warned === k) { applyKey(k, $("chkSaveKey").checked); }
+      this.dataset.warned = k;
+      return;
+    }
+    applyKey(k, $("chkSaveKey").checked);
+  });
+  $("apiKey").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); $("btnKeyApply").click(); }
+  });
+  $("chkSaveKey").addEventListener("change", function(){
+    if(this.checked){
+      if(state.key){ try{ localStorage.setItem(KEY_STORAGE, state.key); }catch(e){} }
+    }else{
+      try{ localStorage.removeItem(KEY_STORAGE); }catch(e){}
+    }
+  });
+  $("btnKeyClear").addEventListener("click", function(){
+    try{ localStorage.removeItem(KEY_STORAGE); }catch(e){}
+    $("apiKey").value = "";
+    $("chkSaveKey").checked = false;
+    msg("sdkNote", "info", null, "이 PC에 저장된 키를 삭제했습니다. 이미 불러온 SDK는 페이지를 새로고침하면 해제됩니다.");
+  });
+
+  /* 검색 방식 */
+  bindSeg("oModeKeyword", "oModeAddress", "originMode");
+  bindSeg("sModeKeyword", "sModeAddress", "stopMode");
+
+  /* 출발지 */
+  $("btnOriginSearch").addEventListener("click", function(){
+    runSearch({
+      input: $("originQuery"), btn: this, mode: state.originMode,
+      boxId: "originResults", msgId: "originMsg",
+      onPick: function(p){
+        if(setOrigin(p)){ hide($("originResults")); }
+      }
+    });
+  });
+  $("originQuery").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); $("btnOriginSearch").click(); }
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".o-chip"), function(b){
+    b.addEventListener("click", function(){
+      $("originQuery").value = this.dataset.q;
+      $("btnOriginSearch").click();
+    });
+  });
+  $("btnOriginDong").addEventListener("click", function(){
+    $("originDongBox").classList.toggle("hidden");
+  });
+  $("btnOriginDongGo").addEventListener("click", function(){
+    $("originQuery").value = $("originDong").value;
+    $("btnOriginSearch").click();
+  });
+  $("btnOriginReset").addEventListener("click", function(){
+    state.origin = null;
+    state.result = null;
+    hide($("cardResult"));
+    renderOrigin();
+    msg("originMsg", "info", null, "출발지를 다시 검색해 선택해 주세요.");
+  });
+
+  /* 출장지 */
+  $("btnStopSearch").addEventListener("click", function(){
+    runSearch({
+      input: $("stopQuery"), btn: this, mode: state.stopMode,
+      boxId: "stopResults", msgId: "stopMsg",
+      onPick: function(p){
+        if(addStop(p)){
+          hide($("stopResults"));
+          $("stopQuery").value = "";
+          $("stopQuery").focus();
+        }
+      }
+    });
+  });
+  $("stopQuery").addEventListener("keydown", function(e){
+    if(e.key === "Enter"){ e.preventDefault(); $("btnStopSearch").click(); }
+  });
+  $("btnStopDong").addEventListener("click", function(){
+    $("stopDongBox").classList.toggle("hidden");
+  });
+  $("btnStopDongGo").addEventListener("click", function(){
+    $("stopQuery").value = $("stopDong").value;
+    $("btnStopSearch").click();
+  });
+
+  /* 좌표 직접 입력 */
+  function manualPlace(){
+    var name = ($("mName").value || "").trim();
+    var lat = num($("mLat").value), lng = num($("mLng").value);
+    if(!name){
+      msg("manualMsg", "warn", "장소 이름을 입력해 주세요", "결과 화면에 표시할 이름이 필요합니다.");
+      return null;
+    }
+    if(lat === null || lng === null){
+      msg("manualMsg", "warn", "위도와 경도를 숫자로 입력해 주세요",
+        "예) 위도 36.991, 경도 127.926 — 소수점을 포함한 숫자여야 합니다.");
+      return null;
+    }
+    if(!validCoord(lat, lng)){
+      msg("manualMsg", "err", "대한민국 범위를 벗어난 좌표입니다",
+        "위도는 33~39.5, 경도는 124~132 사이여야 합니다. 위도와 경도를 바꿔 입력했는지 확인해 주세요.");
+      return null;
+    }
+    return {
+      name: name, address: "직접 입력한 좌표", address2: "", category: "직접 입력",
+      placeId: "", placeUrl: "", lat: lat, lng: lng, source: "사용자 좌표 직접 입력"
+    };
+  }
+  $("btnManualStop").addEventListener("click", function(){
+    var p = manualPlace();
+    if(!p) return;
+    if(addStop(p)){
+      msg("manualMsg", "ok", null, "‘" + p.name + "’을(를) 출장지로 추가했습니다.");
+      $("mName").value = ""; $("mLat").value = ""; $("mLng").value = "";
+    }else{
+      msg("manualMsg", "warn", null, "추가하지 못했습니다. 위 2번 항목의 안내를 확인해 주세요.");
+    }
+  });
+  $("btnManualOrigin").addEventListener("click", function(){
+    var p = manualPlace();
+    if(!p) return;
+    if(setOrigin(p)){
+      msg("manualMsg", "ok", null, "‘" + p.name + "’을(를) 출발지로 지정했습니다.");
+      $("mName").value = ""; $("mLat").value = ""; $("mLng").value = "";
+    }
+  });
+
+  /* 계산 */
+  $("btnSolve").addEventListener("click", solve);
+  $("chkReturn").addEventListener("change", function(){
+    if(state.result){
+      msg("solveMsg", "info", null, "복귀 여부가 바뀌었습니다. ‘최적 방문순서 추천’을 다시 눌러 계산하세요.");
+    }
+  });
+
+  /* 복사 / 인쇄 */
+  $("btnCopy").addEventListener("click", copyResult);
+  $("btnPrint").addEventListener("click", function(){ window.print(); });
+
+  /* 저장된 키 자동 적용 */
+  var saved = null;
+  try{ saved = localStorage.getItem(KEY_STORAGE); }catch(e){}
+  if(kakaoReady()){
+    state.sdk = "ready";
+    renderSdkNote();
+  }else if(saved){
+    $("apiKey").value = saved;
+    $("chkSaveKey").checked = true;
+    applyKey(saved, true);
+  }else{
+    renderSdkNote();
+  }
+
+  window.addEventListener("offline", function(){
+    msg("sdkNote", "err", "인터넷 연결이 끊어졌습니다",
+      "장소 검색을 사용할 수 없습니다. 이미 등록된 장소의 방문순서 계산은 그대로 사용할 수 있습니다.");
+  });
+}
+
+/* 자동화 검증용 — 내부 함수를 그대로 노출한다(프로그램 동작에는 영향 없음) */
+window.__CJ__ = {
+  haversineKm: haversineKm,
+  solveBestOrder: solveBestOrder,
+  samePlace: samePlace,
+  fmtKm: fmtKm,
+  fromPlace: fromPlace,
+  fromAddress: fromAddress,
+  validCoord: validCoord,
+  buildPlainText: buildPlainText,
+  state: state,
+  MAX_STOPS: MAX_STOPS
+};
+
+if(document.readyState === "loading"){
+  document.addEventListener("DOMContentLoaded", init);
+}else{
+  init();
+}
+</script>
+</body>
+</html>
