@@ -261,6 +261,7 @@
     <div class="row" style="margin-top:10px">
       <button type="button" class="danger" id="btnKeyClear">저장된 키 삭제</button>
     </div>
+    <div id="originNote" class="note info" style="margin-top:14px"></div>
     <div class="note warn" style="margin-top:14px">
       <b>JavaScript 키 취급 시 주의</b>
       JavaScript 키는 브라우저가 직접 사용하는 값이라 개발자도구·소스보기로 누구나 볼 수 있습니다. 비밀값으로 취급할 수 없으므로 다음을 꼭 지켜 주세요.
@@ -742,9 +743,9 @@ function describeSdkError(e){
       document.createTextNode("아래 원인 중 하나일 가능성이 큽니다. 위에서부터 확인해 보세요."),
       list([
         "<b>키가 잘못되었거나 지도 제품이 꺼져 있음</b> — 카카오 개발자 사이트의 <code>JavaScript 키</code>를 복사했는지, REST API 키를 넣지 않았는지 확인하세요.",
-        "<b>도메인이 등록되지 않음</b> — 카카오 개발자 사이트 → 내 애플리케이션 → 앱 설정(플랫폼/앱 키) → <code>JavaScript 키</code>의 <code>JavaScript SDK 도메인</code>에 현재 주소를 등록해야 합니다. 현재 이 페이지의 주소는 <code>" +
+        "<b>도메인이 등록되지 않음</b> — 카카오 개발자 사이트에서 <b>앱 설정 → 플랫폼 → Web → 사이트 도메인</b>과 <b>앱 키 → JavaScript 키 → JavaScript SDK 도메인</b> <b>두 곳 모두</b>에 현재 주소를 등록해야 합니다. 현재 이 페이지의 주소는 <code>" +
           (isFile ? "file:// (로컬 파일)" : location.origin) + "</code> 입니다." +
-          (isFile ? " 로컬 파일(<code>file://</code>)은 브라우저가 도메인을 <code>null</code>로 보내기 때문에 등록이 반영되지 않을 수 있습니다. README의 ‘로컬 파일에서 검색이 안 될 때’ 항목을 확인하세요." : ""),
+          (isFile ? " 로컬 파일(<code>file://</code>)은 브라우저가 출처를 <code>null</code>로 처리하므로 어떤 도메인을 등록해도 일치시킬 수 없습니다. README의 3번 항목을 확인하세요." : ""),
         "<b>인터넷/보안 프로그램 차단</b> — 기관 내부망, 방화벽, 백신의 웹 보호 기능이 <code>dapi.kakao.com</code> 접속을 막고 있을 수 있습니다.",
         "<b>무료 사용량 초과</b> — 카카오 개발자 사이트의 쿼터 화면에서 당일 사용량을 확인하세요."
       ]),
@@ -755,20 +756,47 @@ function describeSdkError(e){
     "잠시 후 다시 시도해 주세요. 계속 같은 증상이면 README의 ‘문제 해결’ 항목을 확인하세요."];
 }
 
+/** 로컬 파일(file://)에서 검색이 거부될 때의 전용 안내 */
+function fileProtocolHelp(){
+  return ["err", "로컬 파일에서는 카카오 장소 검색을 사용할 수 없습니다", [
+    document.createTextNode(
+      "이 페이지는 " + locationLabel() + " 로 열려 있습니다. 지도 SDK 파일 자체는 받아졌지만, " +
+      "장소 검색은 별도의 서버 요청이라 카카오가 ‘어느 사이트에서 온 요청인지’를 확인합니다. " +
+      "로컬 파일은 브라우저가 출처를 null 로 처리하기 때문에 어떤 도메인을 등록해도 일치할 수 없습니다. " +
+      "카카오 개발자 사이트에 등록한 주소는 이 파일과 아무 관계가 없습니다."),
+    el("div", null, "해결 방법은 세 가지입니다."),
+    list([
+      "<b>① 좌표 직접 입력 (설치 불필요, 지금 바로 가능)</b> — 아래 ‘위도·경도 직접 입력’을 쓰면 검색만 빠지고 방문순서 추천·거리·복사·인쇄는 그대로 동작합니다.",
+      "<b>② 이 HTML 파일을 https 주소에 올리기 (가장 확실)</b> — 사내 인트라넷, GitHub Pages 등 어디든 파일 하나만 올린 뒤 그 주소를 카카오 <code>JavaScript SDK 도메인</code>에 등록하고, 그 주소로 접속해 사용하세요.",
+      "<b>③ 이미 등록해 둔 주소가 있다면</b> 그 주소로 접속해 사용하세요. 주소창이 <code>file:///</code> 로 시작하면 검색은 동작하지 않습니다."
+    ])
+  ]];
+}
+function locationLabel(){
+  return location.protocol === "file:" ? "로컬 파일(file://)" : location.origin;
+}
+
 function describeSearchError(e){
   var code = (e && e.code) || "UNKNOWN";
+  var isFile = location.protocol === "file:";
   if(code === "TIMEOUT"){
+    if(isFile) return fileProtocolHelp();
     return ["err", "검색 응답이 오지 않았습니다",
       "인터넷 연결이 끊겼거나, 등록된 도메인이 맞지 않아 카카오 서버가 요청을 거부했을 수 있습니다. 네트워크를 확인한 뒤 다시 검색해 보세요."];
   }
   if(code === "API_ERROR"){
+    if(isFile) return fileProtocolHelp();
     return ["err", "검색 중 오류가 발생했습니다", [
-      document.createTextNode("카카오 서버가 요청을 처리하지 못했습니다. 다음을 확인해 주세요."),
+      document.createTextNode(
+        "카카오 서버가 요청을 거부했습니다. 현재 이 페이지의 주소는 " + location.origin + " 입니다. 다음을 확인해 주세요."),
       list([
-        "JavaScript 키가 올바른지, 그리고 <code>JavaScript SDK 도메인</code>에 현재 주소가 등록되어 있는지",
-        "하루 또는 월 무료 사용량(쿼터)을 넘기지 않았는지",
-        "검색어에 특수문자가 지나치게 많지 않은지"
-      ])
+        "카카오 개발자 사이트 → 내 애플리케이션 → <b>앱 설정 → 플랫폼 → Web → 사이트 도메인</b> 에 <code>" + location.origin + "</code> 이(가) 등록되어 있는지 (앱 키 화면의 <code>JavaScript SDK 도메인</code>과는 <b>별개 항목</b>입니다. 두 곳 모두 등록하세요.)",
+        "프로토콜·호스트·포트가 <b>글자 하나까지</b> 같은지 (<code>http</code>/<code>https</code>, <code>www</code> 유무, 포트번호 포함)",
+        "등록 직후라면 몇 분 기다린 뒤 <b>시크릿 창</b>에서 다시 시도 (브라우저 캐시 때문인 사례가 있습니다)",
+        "JavaScript 키가 맞는지 (REST API 키를 넣지 않았는지)",
+        "하루 또는 월 무료 사용량(쿼터)을 넘기지 않았는지"
+      ]),
+      el("div", null, "F12 → Console 탭의 빨간 오류 메시지를 보면 원인이 더 분명해집니다.")
     ]];
   }
   if(code === "SDK_BROKEN"){
@@ -954,6 +982,9 @@ function runSearch(opts){
     opts.btn.disabled = false;
     var d = describeSearchError(e);
     msg(opts.msgId, d[0], d[1], d[2]);
+    // 검색이 실패하면 대안인 좌표 직접 입력 영역을 펼쳐 준다
+    var fold = $("manualFold");
+    if(fold) fold.open = true;
   });
 }
 
@@ -1315,10 +1346,36 @@ function bindSeg(aId, bId, which){
   b.addEventListener("click", function(){ set("address"); });
 }
 
+/** 설정 화면에 "지금 이 페이지의 주소"와 등록 안내를 표시한다. */
+function renderOriginNote(){
+  var box = $("originNote");
+  if(location.protocol === "file:"){
+    msg(box, "warn", "현재 이 파일은 로컬 파일(file://)로 열려 있습니다", [
+      document.createTextNode(
+        "이 상태에서는 키를 올바르게 넣어도 " +
+        "장소 검색이 동작하지 않습니다. 브라우저가 출처를 null 로 처리해 카카오에 등록할 수 있는 도메인이 없기 때문입니다. " +
+        "방문순서 계산은 아래 ‘위도·경도 직접 입력’으로 그대로 사용할 수 있습니다."),
+      el("div", null, "검색까지 쓰려면 이 HTML 파일을 https 주소에 올린 뒤 그 주소로 접속하세요.")
+    ]);
+  }else{
+    msg(box, "info", "카카오에 등록해야 할 주소", [
+      document.createTextNode("지금 이 페이지의 주소는 아래와 같습니다. 이 값을 그대로 복사해 등록하세요."),
+      (function(){ var d = el("div"); d.style.margin = "6px 0";
+        var c = el("code", null, location.origin); c.style.fontSize = "13.5px"; d.appendChild(c); return d; })(),
+      list([
+        "앱 설정 → <b>플랫폼 → Web → 사이트 도메인</b>",
+        "앱 키 → JavaScript 키 → <b>JavaScript SDK 도메인</b>"
+      ]),
+      el("div", null, "두 곳 모두 등록해야 합니다. 등록 직후에는 몇 분 기다린 뒤 시크릿 창에서 확인해 보세요.")
+    ]);
+  }
+}
+
 function init(){
   fillDongSelects();
   renderOrigin();
   renderStops();
+  renderOriginNote();
 
   /* 설정 */
   $("btnSettings").addEventListener("click", function(){

@@ -12,9 +12,11 @@
 import { chromium } from 'playwright';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const APP = pathToFileURL(path.join(HERE, '..', '출장방문순서추천.html')).href;
+const APP_PATH = path.join(HERE, '..', '출장방문순서추천.html');
+const APP = pathToFileURL(APP_PATH).href;
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -456,20 +458,56 @@ try {
     ok('키 형식 오류를 한국어로 안내', (await p.textContent('#sdkNote')).includes('키 형식이 올바르지 않아'));
     await c.close();
   }
-  // (b) API 오류 상태
+  // (b-1) 로컬 파일(file://)에서 검색이 거부될 때 — 실제로 확인된 상황
   {
     const c = await browser.newContext();
     const p = await c.newPage();
     await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'error' });
     await p.goto(APP);
     await p.waitForFunction(() => !!window.__CJ__);
+    await p.click('#btnSettings');
+    const note = await p.textContent('#originNote');
+    ok('설정 화면이 file:// 상태임을 미리 경고', note.includes('로컬 파일(file://)로 열려 있습니다'));
+    ok('경고가 좌표 직접 입력 대안을 함께 안내', note.includes('위도·경도 직접 입력'));
+
+    await p.fill('#stopQuery', '충주경찰서');
+    await p.click('#btnStopSearch');
+    await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('로컬 파일'));
+    const t = await p.textContent('#stopMsg');
+    ok('file://에서 검색 실패 시 원인을 콕 집어 안내',
+      t.includes('로컬 파일에서는 카카오 장소 검색을 사용할 수 없습니다'));
+    ok('등록한 도메인이 무관함을 설명', t.includes('등록한 주소는 이 파일과 아무 관계가 없습니다'));
+    ok('해결책 3가지를 제시', t.includes('좌표 직접 입력') && t.includes('https 주소에 올리기'));
+    ok('검색 실패 후 좌표 직접 입력 영역이 자동으로 펼쳐짐',
+      await p.evaluate(() => document.querySelector('#manualFold').open === true));
+    ok('오류 안내에 영어 개발자 메시지를 노출하지 않음',
+      !/Error|undefined|NaN/.test(t), t.replace(/\s+/g, ' ').slice(0, 160));
+    await c.close();
+  }
+  // (b-2) https 주소에서 검색이 거부될 때 — 도메인 등록 안내
+  {
+    const c = await browser.newContext();
+    const p = await c.newPage();
+    const html = fs.readFileSync(APP_PATH, 'utf8');
+    await p.route('https://example.go.kr/**', r =>
+      r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }));
+    await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'error' });
+    await p.goto('https://example.go.kr/app.html');
+    await p.waitForFunction(() => !!window.__CJ__);
+    await p.click('#btnSettings');
+    const note = await p.textContent('#originNote');
+    ok('https에서는 등록해야 할 주소를 그대로 보여 줌', note.includes('https://example.go.kr'));
+    ok('등록 위치 두 곳을 모두 안내',
+      note.includes('플랫폼 → Web → 사이트 도메인') && note.includes('JavaScript SDK 도메인'));
+
     await p.fill('#stopQuery', '충주경찰서');
     await p.click('#btnStopSearch');
     await p.waitForFunction(() => document.querySelector('#stopMsg').textContent.includes('오류'));
     const t = await p.textContent('#stopMsg');
-    ok('검색 API 오류를 한국어로 안내', t.includes('검색 중 오류가 발생했습니다'));
-    ok('오류 안내에 도메인·사용량 점검 항목 포함', t.includes('도메인') && t.includes('쿼터'));
-    ok('오류 안내에 영어 개발자 메시지를 노출하지 않음', !/Error|undefined|null|NaN/.test(t), t.replace(/\s+/g, ' ').slice(0, 160));
+    ok('https에서 검색 API 오류를 한국어로 안내', t.includes('검색 중 오류가 발생했습니다'));
+    ok('오류 안내에 현재 주소를 그대로 표시', t.includes('https://example.go.kr'));
+    ok('오류 안내에 도메인·캐시·쿼터 점검 항목 포함',
+      t.includes('사이트 도메인') && t.includes('시크릿 창') && t.includes('쿼터'));
     await c.close();
   }
   // (c) 검색 결과 없음
