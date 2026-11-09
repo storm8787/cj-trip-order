@@ -401,6 +401,25 @@ footer.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3);text-align:cente
 
     <div id="originNote" class="note"></div>
 
+    <div class="divider"></div>
+
+    <h3 style="margin-bottom:6px">자동차 도로거리 (선택)</h3>
+    <p class="sub" style="margin:0 0 10px">
+      도로거리로 방문순서를 추천하려면 길찾기 서버가 필요합니다.
+      카카오 <strong>REST API 키는 서버에서만</strong> 다루며, 이 화면에는 입력하지 않습니다.
+      서버가 없으면 직선거리 모드로 그대로 쓸 수 있습니다.
+    </p>
+    <div class="fld">
+      <label for="roadServer">길찾기 서버 주소</label>
+      <div class="searchbar">
+        <input type="text" id="roadServer" placeholder="비워 두면 이 페이지와 같은 주소를 씁니다"
+               autocomplete="off" spellcheck="false" inputmode="url">
+        <button type="button" id="btnRoadCheck">연결 확인</button>
+      </div>
+      <p class="tiny">예) <code>http://localhost:8787</code> — 설정 방법은 docs/ROAD_DISTANCE.md 참고</p>
+    </div>
+    <div id="roadNote" class="note" role="status" aria-live="polite"></div>
+
     <details class="fold" id="keyDetails">
       <summary>키 발급 방법과 보안 안내 자세히 보기</summary>
       <div class="body">
@@ -549,6 +568,17 @@ footer.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3);text-align:cente
 
     <ul class="ready" id="readyList"></ul>
 
+    <div id="modePicker" style="margin-bottom:16px">
+      <div class="card-head" style="margin-bottom:8px">
+        <h3 class="grow">계산 기준</h3>
+      </div>
+      <div class="seg" role="group" aria-label="계산 기준">
+        <button type="button" id="modeRoad" aria-pressed="false">자동차 도로거리</button>
+        <button type="button" id="modeStraight" aria-pressed="true">직선거리</button>
+      </div>
+      <p class="tiny" id="modeHint" style="margin-top:7px"></p>
+    </div>
+
     <label class="toggle" style="margin-bottom:16px">
       <input type="checkbox" id="chkReturn" checked>
       <span class="t">일정을 마치고 출발지로 복귀
@@ -564,15 +594,16 @@ footer.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3);text-align:cente
   <section class="card hidden" id="cardResult" aria-labelledby="h-result" tabindex="-1">
     <div class="card-head">
       <h2 id="h-result" class="grow">추천 방문순서</h2>
-      <span class="chip sm ok no-print"><span class="dot" aria-hidden="true"></span>계산 완료</span>
+      <span id="resultModeChip" class="chip sm"><span class="dot" aria-hidden="true"></span></span>
     </div>
 
     <div class="flow" id="resultFlow"></div>
 
     <div class="hero">
-      <div class="k">총 직선거리</div>
+      <div class="k" id="resultTotalLabel">총 직선거리</div>
       <div class="v" id="resultTotal"></div>
       <div class="d" id="resultMeta"></div>
+      <div class="d hidden" id="resultDurNote" style="margin-top:6px"></div>
     </div>
 
     <div class="row no-print" style="margin-top:16px">
@@ -586,18 +617,11 @@ footer.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3);text-align:cente
       <div class="body" id="resultTable"></div>
     </details>
 
-    <p class="sub" style="margin-top:14px">
-      직선거리 기준 추천이며 <strong>실제 자동차 최단경로와 다를 수 있습니다.</strong>
-    </p>
+    <p class="sub" id="resultCaveat" style="margin-top:14px"></p>
     <details class="fold plain">
-      <summary>왜 다를 수 있나요?</summary>
+      <summary id="resultCaveatWhy">왜 다를 수 있나요?</summary>
       <div class="body">
-        <p class="sub" style="margin:0">
-          두 지점을 잇는 직선거리(Haversine) 합계가 가장 짧은 순서를 계산한 결과입니다.
-          실제 도로·교통상황·일방통행·강이나 산은 반영하지 않으며, 주행시간이나 소요시간도 계산하지 않습니다.
-          충주처럼 남한강과 산지가 가로지르는 지역에서는 직선으로 가까워 보여도 실제로는 돌아가야 하는 구간이 있습니다.
-          최종 출장 계획은 카카오맵 등에서 실제 경로를 확인한 뒤 확정하세요.
-        </p>
+        <p class="sub" id="resultCaveatBody" style="margin:0"></p>
         <p class="sub" id="resultEvaluated" style="margin:10px 0 0"></p>
       </div>
     </details>
@@ -650,8 +674,16 @@ var state = {
   result: null,
   originMode: "keyword",
   stopMode: "keyword",
-  showCoords: false
+  showCoords: false,
+
+  /* 계산 기준: "road" = 자동차 도로거리 최단, "straight" = 직선거리 */
+  calcMode: "straight",
+  /* 길찾기 서버 상태. 서버가 없으면 road 모드는 선택할 수 없다. */
+  server: { url: "", checked: false, road: false, priority: "", maxPoints: 9, radiusM: 0 },
+  roadBusy: false
 };
+
+var SERVER_STORAGE = "cjTripOrder.roadServerUrl";
 
 /* ---------------------------------------------------------------- 도우미 */
 function $(id){ return document.getElementById(id); }
@@ -730,13 +762,43 @@ function fmtKm(km){
   if(km < 1) return Math.round(km*1000) + " m";
   return (Math.round(km*100)/100).toFixed(2) + " km";
 }
+/** 초 → "1시간 23분" / "7분" */
+function fmtDur(sec){
+  if(typeof sec !== "number" || !isFinite(sec)) return "-";
+  var m = Math.round(sec / 60);
+  if(m < 1) return "1분 미만";
+  if(m < 60) return m + "분";
+  var h = Math.floor(m / 60), r = m % 60;
+  return r ? (h + "시간 " + r + "분") : (h + "시간");
+}
+
+/**
+ * 방문 순서를 구간 쌍으로 바꾼다. 0 = 출발지, 1..n = 출장지.
+ * solveBestOrder 가 legs 를 만드는 방식과 같은 규칙이므로,
+ * 거리와 소요시간이 언제나 같은 구간을 가리킨다.
+ */
+function legPairs(order, returnToStart){
+  var pairs = [], prev = 0;
+  for(var t=0;t<order.length;t++){ pairs.push([prev, order[t]+1]); prev = order[t]+1; }
+  if(returnToStart) pairs.push([prev, 0]);
+  return pairs;
+}
 
 /* ---------------------------------------------------------------- 최적화 */
 /**
- * 가능한 모든 방문 순서를 전수 비교해 직선거리 합계가 최소인 순서를 찾는다.
+ * 가능한 모든 방문 순서를 전수 비교해 거리 합계가 최소인 순서를 찾는다.
  * 출발지는 고정. 출장지 n <= 8 이므로 최대 8! = 40,320 가지.
+ *
+ * @param matrix (선택) (n+1)×(n+1) 거리표, 단위 km. 0 = 출발지, 1..n = 출장지.
+ *        주면 그 값으로 계산하고, 주지 않으면 지금까지처럼 Haversine 직선거리를 쓴다.
+ *        도로거리는 A→B 와 B→A 가 다르므로 비대칭 거리표가 들어온다.
+ *        아래 walk()/legs 계산은 원래부터 D[i][j] 를 방향대로 읽으므로
+ *        비대칭 거리표에서도 그대로 올바르게 동작한다.
+ *
+ * 이 매개변수 하나 외에는 기존 동작을 바꾸지 않았다. matrix 를 주지 않은
+ * 호출(직선거리 모드)의 결과는 이전과 완전히 동일하다.
  */
-function solveBestOrder(origin, stops, returnToStart){
+function solveBestOrder(origin, stops, returnToStart, matrix){
   var n = stops.length;
   if(n === 0) throw new Error("EMPTY");
 
@@ -744,7 +806,18 @@ function solveBestOrder(origin, stops, returnToStart){
   var D = [];
   for(var i=0;i<=n;i++){
     D[i] = [];
-    for(var j=0;j<=n;j++) D[i][j] = (i === j) ? 0 : haversineKm(pts[i], pts[j]);
+    for(var j=0;j<=n;j++){
+      if(i === j){ D[i][j] = 0; continue; }
+      if(matrix){
+        var cell = matrix[i] ? matrix[i][j] : null;
+        // 빠진 구간이 하나라도 있으면 계산하지 않는다.
+        // 직선거리로 메워 도로거리인 것처럼 보여주지 않기 위해서다.
+        if(typeof cell !== "number" || !isFinite(cell)) throw new Error("MATRIX_GAP");
+        D[i][j] = cell;
+      }else{
+        D[i][j] = haversineKm(pts[i], pts[j]);
+      }
+    }
   }
 
   var used = new Array(n).fill(false);
@@ -1202,6 +1275,158 @@ function runSearch(opts){
   });
 }
 
+/* ================================================================ 도로거리
+ * 자동차 도로거리는 카카오모빌리티 길찾기 API가 필요하고, 그 API는 REST 키를
+ * 요구한다. REST 키를 브라우저에 두면 그대로 유출되므로, 호출은 반드시
+ * 작은 중계 서버(server/server.mjs)가 맡는다. 이 화면은 좌표만 보내고
+ * 거리표를 돌려받는다. 서버가 없으면 도로거리 모드는 선택할 수 없고,
+ * 지금까지처럼 직선거리 모드로 완전히 동작한다.
+ * ============================================================== */
+
+/** 길찾기 서버 주소. 비어 있으면 이 페이지와 같은 출처를 쓴다. */
+function serverBase(){
+  var u = (state.server.url || "").trim().replace(/\/+$/, "");
+  if(u) return u;
+  if(location.protocol === "file:") return "";     // 로컬 파일은 같은 출처가 없다
+  return location.origin;
+}
+
+/** 서버가 있는지, 도로거리를 쓸 수 있는지 확인한다. 실패해도 조용히 넘어간다. */
+function probeServer(){
+  var base = serverBase();
+  state.server.checked = false;
+  if(!base){
+    state.server.checked = true; state.server.road = false;
+    renderModePicker();
+    return Promise.resolve(false);
+  }
+  var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var timer = setTimeout(function(){ if(ctl) ctl.abort(); }, 5000);
+  return fetch(base + "/api/health", { signal: ctl ? ctl.signal : undefined })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(j){
+      clearTimeout(timer);
+      state.server.checked = true;
+      state.server.road = !!(j && j.road);
+      if(j){
+        state.server.priority  = j.priority || "";
+        state.server.maxPoints = j.maxPoints || 9;
+        state.server.radiusM   = j.radiusM || 0;
+      }
+      // 서버가 준비돼 있으면 도로거리를 기본으로 보여 준다
+      if(state.server.road && state.calcMode !== "road") state.calcMode = "road";
+      if(!state.server.road && state.calcMode === "road") state.calcMode = "straight";
+      renderModePicker();
+      return state.server.road;
+    })
+    .catch(function(){
+      clearTimeout(timer);
+      state.server.checked = true; state.server.road = false;
+      if(state.calcMode === "road") state.calcMode = "straight";
+      renderModePicker();
+      return false;
+    });
+}
+
+/** 서버에서 방향별 거리표를 받는다. 실패 사유는 코드로 구분해 올린다. */
+function fetchRoadMatrix(points){
+  var base = serverBase();
+  if(!base) return Promise.reject({ code:"NO_SERVER" });
+  var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var timer = setTimeout(function(){ if(ctl) ctl.abort(); }, 40000);
+
+  return fetch(base + "/api/matrix", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ points: points.map(function(p){ return { lat:p.lat, lng:p.lng }; }) }),
+    signal: ctl ? ctl.signal : undefined
+  }).then(function(r){
+    clearTimeout(timer);
+    return r.json().catch(function(){ return {}; }).then(function(j){
+      if(!r.ok) throw { code: (j && j.code) || "HTTP_" + r.status, message: j && j.error };
+      return j;
+    });
+  }).catch(function(e){
+    clearTimeout(timer);
+    if(e && e.code) throw e;
+    throw { code: (e && e.name === "AbortError") ? "CLIENT_TIMEOUT" : "NETWORK" };
+  });
+}
+
+/** 서버 응답(미터·초) → 계산에 쓸 km 거리표와 초 단위 시간표 */
+function splitMatrix(raw){
+  var m = raw.length;
+  var dist = [], dur = [];
+  for(var i=0;i<m;i++){
+    dist[i] = []; dur[i] = [];
+    for(var j=0;j<m;j++){
+      var c = raw[i] ? raw[i][j] : null;
+      if(i === j){ dist[i][j] = 0; dur[i][j] = 0; continue; }
+      if(c && typeof c.distance === "number" && isFinite(c.distance)){
+        dist[i][j] = c.distance / 1000;
+        dur[i][j]  = (typeof c.duration === "number" && isFinite(c.duration)) ? c.duration : null;
+      }else{
+        dist[i][j] = null; dur[i][j] = null;
+      }
+    }
+  }
+  return { dist: dist, dur: dur };
+}
+
+function describeRoadError(e, pointNames){
+  var code = (e && e.code) || "UNKNOWN";
+  var fromServer = e && e.message;
+  var T = {
+    NO_SERVER: ["도로거리 계산 서버가 없습니다",
+      "이 화면은 서버 없이도 직선거리 모드로 동작합니다. 도로거리를 쓰려면 길찾기 서버를 띄우고 설정에서 주소를 넣어 주세요."],
+    NO_KEY: ["서버에 카카오 REST API 키가 없습니다",
+      "서버를 실행할 때 환경변수 KAKAO_REST_API_KEY 를 지정해야 도로거리를 계산할 수 있습니다."],
+    KEY_INVALID: ["서버의 카카오 REST API 키가 거부되었습니다",
+      "키가 올바른지, 그리고 길찾기(카카오모빌리티) 이용 권한이 있는지 확인해 주세요."],
+    KEY_FORBIDDEN: ["이 키로는 길찾기 API를 쓸 수 없습니다",
+      "카카오모빌리티 길찾기 API 사용 권한을 신청했는지 확인해 주세요."],
+    QUOTA: ["길찾기 API 호출 한도를 넘었습니다",
+      "오늘 쓸 수 있는 양을 모두 썼습니다. 잠시 뒤에 다시 시도하거나 직선거리 모드로 계산하세요."],
+    RATE_LIMIT: ["요청이 너무 잦습니다", "잠시 기다렸다가 다시 눌러 주세요."],
+    DAILY_BUDGET: ["오늘 이 서버에 허용된 호출량을 모두 썼습니다",
+      "내일 다시 시도하거나 직선거리 모드로 계산하세요."],
+    TIMEOUT: ["길찾기 서버 응답이 제때 오지 않았습니다", "잠시 후 다시 시도해 주세요."],
+    CLIENT_TIMEOUT: ["계산이 너무 오래 걸립니다", "출장지 수를 줄이거나 잠시 후 다시 시도해 주세요."],
+    NETWORK: ["길찾기 서버에 연결하지 못했습니다",
+      "서버가 실행 중인지, 설정의 서버 주소가 맞는지 확인해 주세요."],
+    ORIGIN: ["길찾기 서버가 이 주소의 요청을 거부했습니다",
+      "서버의 ALLOWED_ORIGINS 환경변수에 이 페이지 주소를 넣어야 합니다."],
+    BAD_POINTS: ["좌표를 확인해 주세요", fromServer || "서버가 좌표를 받아들이지 않았습니다."],
+    MISSING_LEGS: ["일부 구간의 도로 경로를 찾지 못했습니다", null]
+  };
+  var t = T[code] || ["도로거리를 계산하지 못했습니다",
+    fromServer || "잠시 후 다시 시도하거나 직선거리 모드로 계산해 주세요."];
+
+  var body = [];
+  if(code === "MISSING_LEGS"){
+    body.push(document.createTextNode(
+      "아래 구간은 자동차 경로가 나오지 않았습니다. 섬·군사지역처럼 차로 갈 수 없거나, " +
+      "좌표가 도로에서 너무 멀리 떨어진 경우입니다."));
+    var ul = el("ul");
+    (e.missing || []).slice(0, 8).forEach(function(mi){
+      ul.appendChild(el("li", null,
+        (pointNames[mi.from] || ("지점 " + mi.from)) + " → " + (pointNames[mi.to] || ("지점 " + mi.to))));
+    });
+    if((e.missing || []).length > 8){
+      ul.appendChild(el("li", null, "외 " + (e.missing.length - 8) + "개 구간"));
+    }
+    body.push(ul);
+    body.push(el("div", null,
+      "빠진 구간을 직선거리로 메우면 도로거리가 아니게 되므로 결과를 만들지 않았습니다."));
+  }else if(t[1]){
+    body.push(document.createTextNode(t[1]));
+    if(fromServer && code !== "BAD_POINTS"){
+      body.push(el("div", "tiny", "서버 응답: " + fromServer));
+    }
+  }
+  return [t[0], body];
+}
+
 /* ---------------------------------------------------------------- 출발지 */
 function setOrigin(p){
   for(var i=0;i<state.stops.length;i++){
@@ -1317,6 +1542,52 @@ function renderStops(){
   wrap.appendChild(el("p", "tiny", "위 번호는 등록한 순서입니다. 추천 방문순서는 계산 후 따로 정해집니다."));
 }
 
+/* ---------------------------------------------------------------- 계산 기준 */
+function setCalcMode(mode){
+  if(mode === "road" && !state.server.road) mode = "straight";
+  if(state.calcMode === mode){ renderModePicker(); return; }
+  state.calcMode = mode;
+  invalidateResult();
+  msg("solveMsg", null);
+  renderModePicker();
+}
+
+function renderModePicker(){
+  var road = $("modeRoad"), straight = $("modeStraight"), hint = $("modeHint");
+  if(!road) return;
+  var on = state.calcMode === "road" && state.server.road;
+  road.setAttribute("aria-pressed", on ? "true" : "false");
+  straight.setAttribute("aria-pressed", on ? "false" : "true");
+  road.disabled = !state.server.road;
+
+  if(!state.server.checked){
+    hint.textContent = "길찾기 서버를 확인하는 중입니다…";
+  }else if(!state.server.road){
+    hint.textContent =
+      "길찾기 서버가 연결되지 않아 직선거리로만 계산합니다. 설정에서 서버 주소를 넣으면 도로거리를 쓸 수 있습니다.";
+  }else if(on){
+    hint.textContent =
+      "카카오모빌리티 길찾기의 실제 주행거리로 가장 짧은 순서를 찾습니다. 예상 운전시간도 함께 보여 줍니다.";
+  }else{
+    hint.textContent = "두 지점을 잇는 직선거리로 계산합니다. 서버 호출이 없어 즉시 끝납니다.";
+  }
+}
+
+function renderRoadNote(){
+  var box = $("roadNote");
+  if(!box) return;
+  if(!state.server.checked){ msg(box, "info", null, "서버 상태를 확인하는 중입니다…"); return; }
+  if(state.server.road){
+    msg(box, "ok", "도로거리를 사용할 수 있습니다",
+      "길찾기 기준 " + (state.server.priority || "DISTANCE") +
+      " · 최대 " + state.server.maxPoints + "지점 · 일괄조회 반경 " +
+      Math.round((state.server.radiusM || 0)/1000) + "km");
+  }else{
+    msg(box, "warn", "길찾기 서버에 연결되지 않았습니다",
+      "직선거리 모드는 그대로 쓸 수 있습니다. 도로거리를 쓰려면 서버를 실행하고 주소를 입력한 뒤 ‘연결 확인’을 누르세요.");
+  }
+}
+
 /* ---------------------------------------------------------------- 준비 상태 */
 function renderReady(){
   var box = $("readyList");
@@ -1357,24 +1628,47 @@ function kakaoMapLink(p, kind){
   return base + encodeURIComponent(p.name) + "," + p.lat + "," + p.lng;
 }
 
+/** 계산 기준을 사람이 읽는 말로 */
+function modeLabel(mode){
+  return mode === "road" ? "자동차 도로거리 최단" : "직선거리 최단";
+}
+function distLabel(mode){
+  return mode === "road" ? "총 주행거리" : "총 직선거리";
+}
+
 function buildPlainText(res){
+  var road = res.mode === "road";
   var lines = [];
   lines.push("[출장 방문순서 추천]");
+  lines.push("계산 기준: " + modeLabel(res.mode) +
+    (road && res.provider ? " (" + res.provider + ")" : ""));
   lines.push("");
   lines.push("출발: " + res.seq[0].name + (res.seq[0].address ? " (" + res.seq[0].address + ")" : ""));
   for(var i=1;i<res.seq.length;i++){
     var p = res.seq[i];
     var tail = (res.returnToStart && i === res.seq.length-1) ? " [복귀]" : "";
-    lines.push(i + ". " + p.name + (p.address ? " (" + p.address + ")" : "") +
-               "  — 직전 구간 " + fmtKm(res.legs[i-1]) + tail);
+    var leg = "  — 직전 구간 " + fmtKm(res.legs[i-1]);
+    if(road && res.legDurations && typeof res.legDurations[i-1] === "number"){
+      leg += " / " + fmtDur(res.legDurations[i-1]);
+    }
+    lines.push(i + ". " + p.name + (p.address ? " (" + p.address + ")" : "") + leg + tail);
   }
   lines.push("");
   lines.push("방문 장소 수: 출발지 1곳 + 출장지 " + res.stopCount + "곳 (총 " + (res.stopCount+1) + "개 지점)");
-  lines.push("총 직선거리: " + fmtKm(res.total));
+  lines.push(distLabel(res.mode) + ": " + fmtKm(res.total));
+  if(road && typeof res.totalDuration === "number"){
+    lines.push("예상 운전시간: " + fmtDur(res.totalDuration) + " (출장지 체류시간 제외)");
+  }
   lines.push(res.returnToStart ? "복귀: 출발지로 복귀" : "복귀: 마지막 출장지에서 종료");
   lines.push("");
-  lines.push("※ 직선거리 기준 추천이며 실제 자동차 최단경로와 다를 수 있습니다.");
-  lines.push("※ 주행시간·소요시간은 계산하지 않았습니다.");
+  if(road){
+    lines.push("※ 카카오모빌리티 길찾기의 거리 우선(DISTANCE) 경로 기준입니다.");
+    lines.push("※ 예상 운전시간은 구간별 소요시간의 합계이며, 출장지 체류시간은 포함하지 않습니다.");
+    lines.push("※ 실시간 교통상황에 따라 실제 소요시간은 달라질 수 있습니다.");
+  }else{
+    lines.push("※ 직선거리 기준 추천이며 실제 자동차 최단경로와 다를 수 있습니다.");
+    lines.push("※ 주행시간·소요시간은 계산하지 않았습니다.");
+  }
   return lines.join("\n");
 }
 
@@ -1393,20 +1687,62 @@ function renderResult(res){
     flow.appendChild(node);
   });
 
-  /* 2) 총거리 강조 */
+  /* 2) 계산 기준 + 총거리 강조 */
+  var road = res.mode === "road";
+  var badge = $("resultModeChip");
+  badge.className = "chip sm " + (road ? "info" : "");
+  clear(badge);
+  badge.appendChild(el("span", "dot"));
+  badge.appendChild(document.createTextNode(modeLabel(res.mode)));
+
+  $("resultTotalLabel").textContent = distLabel(res.mode);
   $("resultTotal").textContent = fmtKm(res.total);
-  $("resultMeta").textContent =
-    "방문 지점 " + (res.stopCount + 1) + "개 · 구간 " + res.legs.length + "개 · " +
+  var meta = "방문 지점 " + (res.stopCount + 1) + "개 · 구간 " + res.legs.length + "개 · " +
     (res.returnToStart ? "출발지로 복귀" : "마지막 출장지에서 종료");
+  if(road && typeof res.totalDuration === "number"){
+    meta += " · 예상 운전시간 " + fmtDur(res.totalDuration);
+  }
+  $("resultMeta").textContent = meta;
+
+  var durNote = $("resultDurNote");
+  if(road && typeof res.totalDuration === "number"){
+    durNote.textContent =
+      "예상 운전시간 " + fmtDur(res.totalDuration) +
+      " — 선택된 경로의 구간별 소요시간을 더한 값이며, 출장지 체류시간은 포함하지 않습니다.";
+    show(durNote);
+  }else{
+    hide(durNote);
+  }
+
   $("resultEvaluated").textContent =
-    "가능한 방문 순서 " + res.evaluated.toLocaleString("ko-KR") + "가지를 모두 비교한 결과입니다.";
+    "가능한 방문 순서 " + res.evaluated.toLocaleString("ko-KR") + "가지를 모두 비교한 결과입니다." +
+    (road ? " 구간 거리는 " + (res.provider || "카카오모빌리티 길찾기") +
+            (res.priority ? "(" + res.priority + " 기준)" : "") + "에서 받았습니다." : "");
+
+  /* 모드별 주의 문구 */
+  $("resultCaveat").innerHTML = road
+    ? "자동차 도로거리 기준입니다. <strong>실시간 교통상황은 반영하지 않습니다.</strong>"
+    : "직선거리 기준 추천이며 <strong>실제 자동차 최단경로와 다를 수 있습니다.</strong>";
+  $("resultCaveatWhy").textContent = road ? "무엇이 반영되고 무엇이 빠졌나요?" : "왜 다를 수 있나요?";
+  $("resultCaveatBody").textContent = road
+    ? "카카오모빌리티 길찾기의 거리 우선(DISTANCE) 경로에서 받은 실제 주행거리입니다. " +
+      "도로망·일방통행·회전 제한은 반영되지만, 조회 시점 이후의 교통상황, 공사, 사고는 반영되지 않습니다. " +
+      "예상 운전시간은 구간별 소요시간의 단순 합계이며 출장지에서 머무는 시간은 빠져 있습니다. " +
+      "출발 직전에 카카오맵에서 실제 경로를 한 번 더 확인하세요."
+    : "두 지점을 잇는 직선거리(Haversine) 합계가 가장 짧은 순서를 계산한 결과입니다. " +
+      "실제 도로·교통상황·일방통행·강이나 산은 반영하지 않으며, 주행시간이나 소요시간도 계산하지 않습니다. " +
+      "충주처럼 남한강과 산지가 가로지르는 지역에서는 직선으로 가까워 보여도 실제로는 돌아가야 하는 구간이 있습니다. " +
+      "최종 출장 계획은 카카오맵 등에서 실제 경로를 확인한 뒤 확정하세요.";
 
   /* 3) 구간 표 (접이식) */
   var tw = $("resultTable");
   clear(tw);
   var tbl = el("table", "legs");
   var thead = el("thead"), htr = el("tr");
-  ["순서","장소","주소","구간거리","누적","지도"].forEach(function(h){ htr.appendChild(el("th", null, h)); });
+  var heads = road
+    ? ["순서","장소","주소","구간거리","소요시간","누적","지도"]
+    : ["순서","장소","주소","구간거리","누적","지도"];
+  heads.forEach(function(h){ htr.appendChild(el("th", null, h)); });
   thead.appendChild(htr); tbl.appendChild(thead);
 
   var tb = el("tbody"), acc = 0;
@@ -1419,16 +1755,23 @@ function renderResult(res){
     if(res.returnToStart && i === res.seq.length-1) c1.appendChild(el("div", "tiny", "출발지로 복귀"));
     tr.appendChild(c1);
     var c2 = el("td", null, p.address || "-"); c2.setAttribute("data-label","주소"); tr.appendChild(c2);
-    var c3, c4;
+    var c3, c4, cT;
     if(i === 0){
       c3 = el("td", "num", "-"); c4 = el("td", "num", "-");
+      if(road) cT = el("td", "num", "-");
     }else{
       acc += res.legs[i-1];
       c3 = el("td", "num", fmtKm(res.legs[i-1]));
       c4 = el("td", "num", fmtKm(acc));
+      if(road){
+        var d = res.legDurations ? res.legDurations[i-1] : null;
+        cT = el("td", "num", typeof d === "number" ? fmtDur(d) : "-");
+      }
     }
     c3.setAttribute("data-label","구간거리"); c4.setAttribute("data-label","누적");
-    tr.appendChild(c3); tr.appendChild(c4);
+    tr.appendChild(c3);
+    if(road){ cT.setAttribute("data-label","소요시간"); tr.appendChild(cT); }
+    tr.appendChild(c4);
     var c5 = el("td"); c5.setAttribute("data-label","지도");
     var a = el("a", null, i === 0 ? "지도 보기" : "길찾기");
     a.href = kakaoMapLink(p, i === 0 ? "map" : "to");
@@ -1437,10 +1780,14 @@ function renderResult(res){
     tb.appendChild(tr);
   });
   var ttr = el("tr", "total");
-  var t0 = el("td", "idx", ""); ttr.appendChild(t0);
-  var t1 = el("td", null, "총 직선거리"); t1.setAttribute("data-label",""); ttr.appendChild(t1);
+  ttr.appendChild(el("td", "idx", ""));
+  var t1 = el("td", null, distLabel(res.mode)); t1.setAttribute("data-label",""); ttr.appendChild(t1);
   ttr.appendChild(el("td"));
   ttr.appendChild(el("td", "num", ""));
+  if(road){
+    var tD = el("td", "num", typeof res.totalDuration === "number" ? fmtDur(res.totalDuration) : "-");
+    tD.setAttribute("data-label","소요시간 합계"); ttr.appendChild(tD);
+  }
   var t4 = el("td", "num", fmtKm(res.total)); t4.setAttribute("data-label","합계"); ttr.appendChild(t4);
   ttr.appendChild(el("td"));
   tb.appendChild(ttr);
@@ -1451,7 +1798,9 @@ function renderResult(res){
 
   /* 접근성용 요약 (화면에는 보이지 않음) */
   $("resultSum").textContent =
-    "총 직선거리 " + fmtKm(res.total) + ", 방문 지점 " + (res.stopCount+1) + "개 지점.";
+    modeLabel(res.mode) + " 기준 " + distLabel(res.mode) + " " + fmtKm(res.total) +
+    (road && typeof res.totalDuration === "number" ? ", 예상 운전시간 " + fmtDur(res.totalDuration) : "") +
+    ", 방문 지점 " + (res.stopCount+1) + "개 지점.";
 }
 
 function solve(){
@@ -1477,22 +1826,18 @@ function solve(){
   }
 
   var returnToStart = $("chkReturn").checked;
-  var res;
-  try{
-    res = solveBestOrder(state.origin, state.stops, returnToStart);
-  }catch(e){
-    msg("solveMsg", "err", "방문순서를 계산하지 못했습니다",
-      "등록된 장소의 좌표를 확인한 뒤 다시 시도해 주세요.");
-    return;
-  }
+  if(state.calcMode === "road" && state.server.road) solveRoad(returnToStart);
+  else solveStraight(returnToStart);
+}
 
-  // 무결성: 모든 출장지가 정확히 한 번씩
+/** 공통 마무리 — 순서 무결성 확인, 결과 조립, 화면 출력 */
+function finishSolve(res, returnToStart, extra){
   var seen = {}, dup = false;
   res.order.forEach(function(k){ if(seen[k]) dup = true; seen[k] = true; });
   if(dup || res.order.length !== state.stops.length){
     msg("solveMsg", "err", "계산 결과가 올바르지 않습니다",
       "방문 순서에 누락 또는 중복이 발생했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.");
-    return;
+    return false;
   }
 
   var seq = [state.origin].concat(res.order.map(function(k){ return state.stops[k]; }));
@@ -1501,7 +1846,12 @@ function solve(){
   state.result = {
     seq: seq, legs: res.legs, total: res.total,
     stopCount: state.stops.length, returnToStart: returnToStart,
-    evaluated: res.evaluated
+    evaluated: res.evaluated,
+    mode: (extra && extra.mode) || "straight",
+    legDurations: (extra && extra.legDurations) || null,
+    totalDuration: (extra && extra.totalDuration) || null,
+    provider: (extra && extra.provider) || null,
+    priority: (extra && extra.priority) || null
   };
 
   renderResult(state.result);
@@ -1513,6 +1863,75 @@ function solve(){
     msg("solveMsg", null);
   }
   $("cardResult").scrollIntoView({ behavior:"smooth", block:"start" });
+  return true;
+}
+
+/** 직선거리 모드 — 기존 동작 그대로 */
+function solveStraight(returnToStart){
+  var res;
+  try{
+    res = solveBestOrder(state.origin, state.stops, returnToStart);
+  }catch(e){
+    msg("solveMsg", "err", "방문순서를 계산하지 못했습니다",
+      "등록된 장소의 좌표를 확인한 뒤 다시 시도해 주세요.");
+    return;
+  }
+  finishSolve(res, returnToStart, { mode: "straight" });
+}
+
+/** 도로거리 모드 — 구간 거리표를 한 번 받아 두고, 순서는 앱에서 전수 비교 */
+function solveRoad(returnToStart){
+  if(state.roadBusy) return;
+  var pts = [state.origin].concat(state.stops);
+  var names = pts.map(function(p){ return p.name; });
+
+  state.roadBusy = true;
+  setSolveBusy(true, "카카오모빌리티에서 구간별 주행거리를 받는 중…");
+  msg("solveMsg", "info", null,
+    "지점 " + pts.length + "곳의 구간 거리를 조회하고 있습니다. 잠시만 기다려 주세요.");
+
+  fetchRoadMatrix(pts).then(function(data){
+    if(data.missing && data.missing.length){
+      throw { code: "MISSING_LEGS", missing: data.missing };
+    }
+    var split = splitMatrix(data.matrix || []);
+    var res = solveBestOrder(state.origin, state.stops, returnToStart, split.dist);
+
+    // 거리와 같은 규칙으로 구간을 집어 소요시간을 더한다
+    var pairs = legPairs(res.order, returnToStart);
+    var legDurations = pairs.map(function(pr){ return split.dur[pr[0]][pr[1]]; });
+    var totalDuration = legDurations.every(function(d){ return typeof d === "number"; })
+      ? legDurations.reduce(function(a,b){ return a+b; }, 0) : null;
+
+    state.roadBusy = false;
+    setSolveBusy(false);
+    finishSolve(res, returnToStart, {
+      mode: "road",
+      legDurations: legDurations,
+      totalDuration: totalDuration,
+      provider: data.provider || "카카오모빌리티 길찾기",
+      priority: data.priority || ""
+    });
+  }).catch(function(e){
+    state.roadBusy = false;
+    setSolveBusy(false);
+    if(e && e.message === "MATRIX_GAP"){
+      e = { code: "MISSING_LEGS", missing: [] };
+    }
+    var d = describeRoadError(e, names);
+    msg("solveMsg", "err", d[0], d[1]);
+    // 사용자가 바로 빠져나갈 수 있게 직선거리 재계산 버튼을 둔다
+    $("solveMsg").appendChild(actionBtn("직선거리로 계산하기", function(){
+      setCalcMode("straight");
+      solveStraight($("chkReturn").checked);
+    }));
+  });
+}
+
+function setSolveBusy(on, label){
+  var b = $("btnSolve");
+  b.disabled = !!on;
+  b.textContent = on ? (label || "계산 중…") : "최적 방문순서 추천";
 }
 
 /* ---------------------------------------------------------------- 복사 */
@@ -1592,6 +2011,7 @@ function init(){
   renderStops();
   renderReady();
   renderOriginNote();
+  renderModePicker();
 
   /* ── 설정 ── */
   $("btnSettings").addEventListener("click", function(){
@@ -1747,6 +2167,27 @@ function init(){
     if(setOrigin(p)){ msg("manualMsg", null); clearManual(); toast("출발지: " + p.name); }
   });
 
+  /* ── 계산 기준 ── */
+  $("modeRoad").addEventListener("click", function(){ setCalcMode("road"); });
+  $("modeStraight").addEventListener("click", function(){ setCalcMode("straight"); });
+
+  /* ── 길찾기 서버 ── */
+  var savedServer = null;
+  try{ savedServer = localStorage.getItem(SERVER_STORAGE); }catch(e){}
+  if(savedServer){ state.server.url = savedServer; $("roadServer").value = savedServer; }
+
+  $("btnRoadCheck").addEventListener("click", function(){
+    var v = ($("roadServer").value || "").trim();
+    state.server.url = v;
+    try{ v ? localStorage.setItem(SERVER_STORAGE, v) : localStorage.removeItem(SERVER_STORAGE); }catch(e){}
+    msg("roadNote", "info", null, "연결을 확인하는 중입니다…");
+    probeServer().then(function(ok){
+      renderRoadNote();
+      if(ok) toast("도로거리를 사용할 수 있습니다");
+    });
+  });
+  onEnter("roadServer", "btnRoadCheck");
+
   /* ── 계산 ── */
   $("btnSolve").addEventListener("click", solve);
   $("chkReturn").addEventListener("change", function(){
@@ -1780,6 +2221,9 @@ function init(){
     msg("sdkNote", "err", "인터넷 연결이 끊어졌습니다",
       "장소 검색을 쓸 수 없습니다. 이미 등록한 장소의 방문순서 계산은 그대로 가능합니다.");
   });
+
+  /* 길찾기 서버가 있는지 조용히 확인한다. 없으면 직선거리 모드 그대로. */
+  probeServer().then(renderRoadNote);
 }
 
 /* 자동화 검증용 — 내부 함수를 그대로 노출한다(프로그램 동작에는 영향 없음) */
@@ -1788,6 +2232,11 @@ window.__CJ__ = {
   solveBestOrder: solveBestOrder,
   samePlace: samePlace,
   fmtKm: fmtKm,
+  fmtDur: fmtDur,
+  legPairs: legPairs,
+  splitMatrix: splitMatrix,
+  setCalcMode: setCalcMode,
+  probeServer: probeServer,
   fromPlace: fromPlace,
   fromAddress: fromAddress,
   validCoord: validCoord,
