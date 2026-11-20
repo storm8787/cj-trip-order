@@ -292,7 +292,9 @@ function serveStatic(req, res, urlPath) {
   let p = decodeURIComponent(urlPath);
   // GitHub Pages 와 같은 하위 경로로 열어도 되게 한다
   if (p.startsWith('/cj-trip-order')) p = p.slice('/cj-trip-order'.length);
-  if (p === '' || p === '/') p = '/index.html';
+  // 서버 배포에서는 앱을 바로 제공해 주소창의 루트 경로를 유지한다.
+  // GitHub Pages용 index.html과 한글 파일 직접 접속은 그대로 둔다.
+  if (p === '' || p === '/') p = '/출장방문순서추천.html';
   const file = path.resolve(ROOT, '.' + p);
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
