@@ -4,7 +4,7 @@
  * 이 서버가 존재하는 이유는 단 하나입니다.
  * 카카오모빌리티 길찾기 API는 **REST API 키**를 요구하는데,
  * REST 키는 브라우저에 두면 그대로 유출되므로 서버에서만 다뤄야 합니다.
- * (장소 검색용 JavaScript 키는 지금까지처럼 브라우저가 직접 씁니다.)
+ * 장소 검색용 JavaScript 키는 공개 설정 API로 전달해 브라우저가 직접 씁니다.
  *
  * 그 밖의 설계 원칙은 그대로입니다.
  *   - 의존성 0개. Node 18+ 내장 모듈만 사용합니다.
@@ -28,6 +28,7 @@ const ROOT = path.resolve(HERE, '..');
 const CFG = {
   port:        Number(process.env.PORT || 8787),
   key:         process.env.KAKAO_REST_API_KEY || '',
+  javascriptKey: process.env.KAKAO_JAVASCRIPT_KEY || '',
   priority:    (process.env.KAKAO_PRIORITY || 'DISTANCE').toUpperCase(),
   // 다중 목적지 API의 radius 상한은 10,000 m 입니다. 그 이상은 지정할 수 없습니다.
   radius:      Math.min(Number(process.env.KAKAO_RADIUS || 10000), 10000),
@@ -326,8 +327,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'OPTIONS') { res.writeHead(allowed ? 204 : 403); return res.end(); }
 
-  /* 상태 확인 — 화면이 도로거리 모드를 켤 수 있는지 판단하는 데 씁니다.
-     키 자체는 절대 내보내지 않고, 설정되어 있는지만 알려 줍니다. */
+  // 명시적으로 허용한 공개 값만 반환합니다. CFG나 process.env를 직렬화하지 않습니다.
+  if (url.pathname === '/api/config') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'GET 으로 요청해 주세요.' });
+    return sendJson(res, 200, { kakaoJavascriptKey: CFG.javascriptKey });
+  }
+
+  /* 상태 확인은 REST 키의 존재 여부만 알립니다. */
   if (url.pathname === '/api/health') {
     return sendJson(res, 200, {
       ok: true,

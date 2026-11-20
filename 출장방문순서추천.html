@@ -358,7 +358,7 @@ footer.foot{margin-top:28px;font-size:12.5px;color:var(--ink-3);text-align:cente
       <span id="sdkChip" class="chip" role="status" aria-live="polite">
         <span class="dot" aria-hidden="true"></span><span id="sdkChipText">준비 중</span>
       </span>
-      <button type="button" id="btnSettings" aria-expanded="false" aria-controls="cardSettings">설정</button>
+      <button type="button" id="btnSettings" hidden aria-expanded="false" aria-controls="cardSettings">설정</button>
     </div>
   </header>
 
@@ -666,6 +666,8 @@ var CHUNGJU_DONG = [
 /* ---------------------------------------------------------------- 상태 */
 var state = {
   key: "",
+  managedKey: false,
+  configPending: true,
   sdk: "idle",          // idle | loading | ready | error
   sdkError: "",
   sdkErrorDetail: null,
@@ -1000,6 +1002,7 @@ function locationLabel(){
   return location.protocol === "file:" ? "로컬 파일(file://)" : location.origin;
 }
 function openSettings(){
+  if(state.managedKey || state.configPending) return;
   var c = $("cardSettings");
   c.hidden = false;
   $("btnSettings").setAttribute("aria-expanded", "true");
@@ -1017,7 +1020,12 @@ function fileProtocolHelp(){
     ])
   ]];
 }
+function managedSearchError(){
+  return ["err", "장소 검색을 준비하지 못했습니다",
+    "관리자가 배포 환경의 검색 설정과 카카오 도메인 등록·사용량을 확인해야 합니다. 잠시 후 새로고침해 주세요. 좌표 직접 입력으로 방문순서 추천은 사용할 수 있습니다."];
+}
 function describeSdkError(e){
+  if(state.managedKey) return managedSearchError();
   var code = (e && e.code) || "UNKNOWN";
   var isFile = location.protocol === "file:";
   if(code === "NO_KEY"){
@@ -1043,6 +1051,7 @@ function describeSdkError(e){
   return ["err", "장소 검색을 준비하지 못했습니다", "잠시 후 설정에서 ‘적용’을 다시 눌러 주세요."];
 }
 function describeSearchError(e){
+  if(state.managedKey) return managedSearchError();
   var code = (e && e.code) || "UNKNOWN";
   var isFile = location.protocol === "file:";
   if(code === "TIMEOUT"){
@@ -1112,7 +1121,7 @@ function applyKey(key, remember){
     return Promise.resolve(false);
   }
   state.sdk = "loading"; state.sdkErrorDetail = null; renderSdkState();
-  if(remember){ try{ localStorage.setItem(KEY_STORAGE, state.key); }catch(e){} }
+  if(remember && !state.managedKey){ try{ localStorage.setItem(KEY_STORAGE, state.key); }catch(e){} }
   return loadKakaoSdk(state.key).then(function(){
     state.sdk = "ready"; renderSdkState();
     toast("장소 검색을 사용할 수 있습니다");
@@ -1124,6 +1133,52 @@ function applyKey(key, remember){
     renderSdkState();
     return false;
   });
+}
+
+/* 공개 설정을 먼저 확인해 저장 키와 SDK 로딩이 경쟁하지 않게 한다. */
+function initializeSearch(){
+  function manual(){
+    state.configPending = false;
+    state.sdk = "idle";
+    $("btnSettings").hidden = false;
+    var saved = null;
+    try{ saved = localStorage.getItem(KEY_STORAGE); }catch(e){}
+    if(kakaoReady()){
+      state.sdk = "ready"; renderSdkState();
+    }else if(saved){
+      $("apiKey").value = saved;
+      $("chkSaveKey").checked = true;
+      applyKey(saved, false);
+    }else{ renderSdkState(); }
+  }
+  function managedFailure(){
+    state.configPending = false;
+    state.managedKey = true;
+    state.sdk = "error";
+    state.sdkErrorDetail = managedSearchError();
+    renderSdkState();
+  }
+  if(location.protocol === "file:"){ manual(); return; }
+  state.sdk = "loading"; renderSdkState();
+  var ctl = new AbortController();
+  var timer = setTimeout(function(){ ctl.abort(); }, 5000);
+  return fetch("/api/config", { cache:"no-store", signal:ctl.signal }).then(function(res){
+    // 정적 호스팅은 공개 설정 API가 없으므로 기존 수동 방식을 유지한다.
+    if(res.status === 404) return undefined;
+    if(!res.ok) throw new Error("CONFIG_HTTP");
+    return res.json();
+  }).then(function(config){
+    clearTimeout(timer);
+    if(config === undefined || (config && config.kakaoJavascriptKey === "")){ manual(); return; }
+    state.managedKey = true;
+    state.configPending = false;
+    var key = config.kakaoJavascriptKey;
+    if(typeof key !== "string" || !/^[a-f0-9]{32}$/i.test(key)){
+      managedFailure(); return;
+    }
+    // 서버 키는 메모리에서만 사용하며 기존 브라우저 저장 값은 건드리지 않는다.
+    return applyKey(key, false);
+  }).catch(function(){ clearTimeout(timer); managedFailure(); });
 }
 
 /** 설정 화면의 "등록해야 할 주소" 안내 */
@@ -1215,6 +1270,10 @@ function runSearch(opts){
   if(query.length < 2){
     msg(opts.msgId, "warn", null, "두 글자 이상 입력해 주세요.");
     opts.input.focus();
+    return;
+  }
+  if(state.configPending){
+    msg(opts.msgId, "info", null, "검색 설정을 확인하고 있습니다. 잠시 후 검색해 주세요.");
     return;
   }
   if(state.sdk !== "ready"){
@@ -2204,18 +2263,7 @@ function init(){
     window.print();
   });
 
-  /* ── 저장된 키 자동 적용 ── */
-  var saved = null;
-  try{ saved = localStorage.getItem(KEY_STORAGE); }catch(e){}
-  if(kakaoReady()){
-    state.sdk = "ready"; renderSdkState();
-  }else if(saved){
-    $("apiKey").value = saved;
-    $("chkSaveKey").checked = true;
-    applyKey(saved, true);
-  }else{
-    renderSdkState();
-  }
+  initializeSearch();
 
   window.addEventListener("offline", function(){
     msg("sdkNote", "err", "인터넷 연결이 끊어졌습니다",
