@@ -280,7 +280,8 @@ try {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', e => { fail++; failures.push('pageerror: ' + e.message); console.log('  FAIL  콘솔 예외: ' + e.message); });
-  await page.goto(BASE + '/%EC%B6%9C%EC%9E%A5%EB%B0%A9%EB%AC%B8%EC%88%9C%EC%84%9C%EC%B6%94%EC%B2%9C.html');
+  await page.goto(BASE + '/');
+  ok('도로거리 화면은 루트 주소를 유지', page.url() === BASE + '/');
   await page.waitForFunction(() => !!window.__CJ__);
   {
     const D = roadMatrixKm(3);
@@ -493,6 +494,8 @@ try {
     }
     upstreamMode = 'ok';
   }
+
+  ok('도로거리 계산과 오류 처리 후에도 루트 주소 유지', page.url() === BASE + '/');
 
   /* ---------------- 12. 서버 없이도 동작 ---------------- */
   section('12. 서버 없는 정적 배포본 — 직선거리 모드로 동작');

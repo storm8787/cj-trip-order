@@ -33,6 +33,11 @@ try {
   check((await fetch(base+'/api/config',{method:'POST'})).status===405,'설정은 GET만 허용');
   const html = await (await fetch(base+'/%EC%B6%9C%EC%9E%A5%EB%B0%A9%EB%AC%B8%EC%88%9C%EC%84%9C%EC%B6%94%EC%B2%9C.html')).text();
   check(!html.includes(rest) && !html.includes(key), 'HTML에 환경변수 키를 삽입하지 않음');
+  const rootResponse = await fetch(base+'/', { redirect:'manual' });
+  check(rootResponse.status===200 && !rootResponse.headers.has('location'), '루트 요청은 리다이렉트 없이 200 응답');
+  check((await rootResponse.text())===html, '루트에서 한글 파일과 동일한 앱 HTML 제공');
+  const index = await (await fetch(base+'/index.html')).text();
+  check(index.includes('location.replace('), 'GitHub Pages용 index.html 유지');
   browser = await chromium.launch();
   async function pageFor(config, behavior='ok', saved=true){
     const context = await browser.newContext();
@@ -47,12 +52,13 @@ try {
     if(config!==undefined) await page.route('**/api/config', route=> config===404
       ? route.fulfill({status:404,body:'Not Found'})
       : route.fulfill({json:config}));
-    await page.goto(base+'/출장방문순서추천.html');
+    await page.goto(base+'/');
     await page.waitForFunction(()=>window.__CJ__ && !window.__CJ__.state.configPending && ['idle','ready','error'].includes(window.__CJ__.state.sdk));
     assert.deepEqual(errors,[]);
     return {context,page,keys};
   }
   let t=await pageFor();
+  check(t.page.url()===base+'/', 'SDK 초기화 후에도 주소창 루트 유지');
   check(t.keys.length===1 && t.keys[0]===key,'서버 키가 저장 키보다 먼저 자동 적용');
   check(await t.page.locator('#btnSettings').isHidden(),'자동 설정 환경에서 설정 UI 숨김');
   check(await t.page.evaluate(()=>localStorage.getItem('cjTripOrder.kakaoJsKey'))==='saved-manual-key','자동 키를 localStorage에 저장하지 않음');
@@ -63,6 +69,7 @@ try {
   await t.page.click('#btnOriginSearch');
   await t.page.locator('#originResults button').first().waitFor();
   check((await t.page.locator('#originResults').innerText()).includes('충주시청'),'자동 설정으로 주소 검색');
+  check(t.page.url()===base+'/', '장소·주소 검색 후에도 주소창 루트 유지');
   await t.context.close();
   for(const config of [{kakaoJavascriptKey:''},404]){
     t=await pageFor(config);
