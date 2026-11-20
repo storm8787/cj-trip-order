@@ -548,6 +548,7 @@ try {
     const html = fs.readFileSync(APP_PATH, 'utf8');
     await p.route('https://example.go.kr/**', r =>
       r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }));
+    await p.route('https://example.go.kr/api/config', r => r.fulfill({ status:404, body:'nf' }));
     await p.addInitScript(mockInit(), { db: MOCK_DB, addrs: MOCK_ADDR, behavior: 'error' });
     await p.goto('https://example.go.kr/app.html');
     await p.waitForFunction(() => !!window.__CJ__);

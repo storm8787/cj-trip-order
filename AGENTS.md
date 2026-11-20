@@ -16,7 +16,7 @@
    CSS와 JavaScript는 그 안에 들어 있어야 합니다.
 2. **빌드 없음.** React, Vue, Next.js, Vite, 번들러, 트랜스파일러를 도입하지 않습니다.
    최종 사용자가 받는 산출물은 언제나 HTML 파일 하나입니다.
-3. **서버는 도로거리 전용, 그리고 선택사항.** 데이터베이스, Cloudflare(Pages/Workers/D1),
+3. **서버는 도로거리와 공개 검색 설정용, 그리고 선택사항.** 데이터베이스, Cloudflare(Pages/Workers/D1),
    Supabase, Firebase 는 여전히 금지입니다.
    `server/server.mjs` 하나만 예외로 허용하며, 존재 이유는 **카카오 REST API 키를
    브라우저에 노출하지 않기 위해서**입니다. 의존성 0개, Node 내장 모듈만 씁니다.
@@ -27,7 +27,7 @@
    - HTML 파일을 내려받아 더블클릭 (`file://`)
 6. **외부 의존성은 카카오 지도 JavaScript SDK 하나뿐.** 실행 중 동적으로만 불러옵니다.
    `<script src>` / `<link rel=stylesheet>` 태그는 파일에 0개여야 합니다.
-7. **API 키를 저장소에 커밋하지 않습니다.** 키는 사용자가 설정 화면에서 입력합니다.
+7. **API 키를 저장소에 커밋하지 않습니다.** 서버의 `KAKAO_JAVASCRIPT_KEY`는 공개 설정 API로 자동 적용할 수 있습니다. 없으면 기존 수동 입력을 유지합니다. REST 키는 서버 밖으로 노출하지 않습니다.
 
 개발용 도구(Playwright 등)는 추가해도 됩니다. 단 **사용자 실행 조건이 되어서는 안 됩니다.**
 
@@ -90,6 +90,7 @@ Haversine 으로 계산합니다. 열거 부분은 원래부터 `D[i][j]` 를 �
 npm i -D playwright && npx playwright install chromium
 node tests/verify.mjs    # 직선거리 모드와 화면 전반
 node tests/road.mjs      # 도로거리 모드 (가짜 상위 서버 사용)
+node tests/config.mjs    # 공개 설정·자동/수동 검색 초기화 (Mock SDK)
 ```
 
 - 실제 배포 파일을 Chromium에서 `file://` 와 가상 `https://` 양쪽으로 열어 검증합니다.
