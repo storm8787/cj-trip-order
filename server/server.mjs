@@ -1,10 +1,10 @@
 /**
- * 출장 방문순서 추천기 — 도로거리 계산용 최소 서버
+ * 출장 방문순서 추천기 — 도로거리·Local 검색용 최소 서버
  *
- * 이 서버가 존재하는 이유는 단 하나입니다.
+ * 이 서버는 도로거리와 업무도구함용 장소·주소 검색을 중계합니다.
  * 카카오모빌리티 길찾기 API는 **REST API 키**를 요구하는데,
  * REST 키는 브라우저에 두면 그대로 유출되므로 서버에서만 다뤄야 합니다.
- * 장소 검색용 JavaScript 키는 공개 설정 API로 전달해 브라우저가 직접 씁니다.
+ * 기존 사이트는 장소 검색용 JavaScript 키를 공개 설정 API로 받아 SDK를 그대로 씁니다.
  *
  * 그 밖의 설계 원칙은 그대로입니다.
  *   - 의존성 0개. Node 18+ 내장 모듈만 사용합니다.
@@ -25,6 +25,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 
 /* ------------------------------------------------------------------ 설정 */
+function boundedEnv(name, fallback, min, max) {
+  const value = process.env[name] === undefined ? fallback : Number(process.env[name]);
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid setting: ${name}`);
+  return value;
+}
 const CFG = {
   port:        Number(process.env.PORT || 8787),
   key:         process.env.KAKAO_REST_API_KEY || '',
@@ -33,19 +38,34 @@ const CFG = {
   // 다중 목적지 API의 radius 상한은 10,000 m 입니다. 그 이상은 지정할 수 없습니다.
   radius:      Math.min(Number(process.env.KAKAO_RADIUS || 10000), 10000),
   maxPoints:   Number(process.env.MAX_POINTS || 9),       // 출발지 1 + 출장지 8
-  ratePerMin:  Number(process.env.RATE_LIMIT_PER_MIN || 20),
-  dailyCalls:  Number(process.env.DAILY_CALL_BUDGET || 5000),
-  timeoutMs:   Number(process.env.UPSTREAM_TIMEOUT_MS || 10000),
-  concurrency: Number(process.env.UPSTREAM_CONCURRENCY || 4),
+  ratePerMin:  boundedEnv('RATE_LIMIT_PER_MIN', 20, 1, 10000),
+  dailyCalls:  boundedEnv('DAILY_CALL_BUDGET', 5000, 0, 1000000),
+  timeoutMs:   boundedEnv('UPSTREAM_TIMEOUT_MS', 10000, 1, 60000),
+  concurrency: boundedEnv('UPSTREAM_CONCURRENCY', 4, 1, 32),
   // 정적 화면을 다른 곳(GitHub Pages, ChatGPT Sites 등)에 올렸을 때 허용할 출처
   allowOrigins: (process.env.ALLOWED_ORIGINS || '')
     .split(',').map(s => s.trim()).filter(Boolean),
+  searchRate: boundedEnv('SEARCH_RATE_LIMIT_PER_MIN', 30, 1, 10000),
+  searchDailyCalls: boundedEnv('SEARCH_DAILY_CALL_BUDGET', 1000, 0, 1000000),
+  searchTimeoutMs: boundedEnv('SEARCH_TIMEOUT_MS', 5000, 1, 60000),
+  searchConcurrency: boundedEnv('SEARCH_UPSTREAM_CONCURRENCY', 4, 1, 32),
+  allowFileOrigin: process.env.ALLOW_FILE_ORIGIN === 'true',
   serveStatic: process.env.SERVE_STATIC !== 'false'
 };
 
 // 기본값은 카카오모빌리티 운영 주소. 테스트에서만 가짜 상위 서버로 돌려 끼웁니다.
 const NAVI_BASE   = (process.env.KAKAO_NAVI_BASE || 'https://apis-navi.kakaomobility.com')
                       .replace(/\/+$/, '');
+// Only a server-side loopback override is accepted for Local API mock tests.
+let LOCAL_BASE = 'https://dapi.kakao.com';
+if (process.env.KAKAO_LOCAL_BASE) {
+  const testBase = new URL(process.env.KAKAO_LOCAL_BASE);
+  if (testBase.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(testBase.hostname) ||
+      testBase.username || testBase.password || testBase.pathname !== '/' || testBase.search || testBase.hash) {
+    throw new Error('KAKAO_LOCAL_BASE must be a loopback test server');
+  }
+  LOCAL_BASE = testBase.origin;
+}
 const NAVI_SINGLE = NAVI_BASE + '/v1/directions';
 const NAVI_MULTI  = NAVI_BASE + '/v1/destinations/directions';
 
@@ -58,22 +78,33 @@ function log(...a) {
 
 /* ------------------------------------------------------------------ 호출량 제한 */
 const buckets = new Map();           // ip -> { count, resetAt }
-let dailyUsed = 0, dailyResetAt = Date.now() + 86400e3;
+const searchBuckets = new Map();
+const pendingSearches = new Map();
+const searchBudget = { used: 0, resetAt: Date.now() + 86400e3, limit: CFG.searchDailyCalls };
+const roadBudget = { used: 0, resetAt: Date.now() + 86400e3, limit: CFG.dailyCalls };
 
-function rateLimit(ip) {
+// Reserve synchronously before fetch: failed calls and concurrent calls count too.
+function reserveCall(budget) {
   const now = Date.now();
-  if (now > dailyResetAt) { dailyUsed = 0; dailyResetAt = now + 86400e3; }
-  if (dailyUsed >= CFG.dailyCalls) return 'DAILY_BUDGET';
-  let b = buckets.get(ip);
-  if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + 60e3 }; buckets.set(ip, b); }
-  if (b.count >= CFG.ratePerMin) return 'RATE_LIMIT';
+  if (now >= budget.resetAt) { budget.used = 0; budget.resetAt = now + 86400e3; }
+  if (budget.used >= budget.limit) throw new UpstreamError('DAILY_BUDGET');
+  budget.used++;
+}
+
+function rateLimit(ip, store = buckets, limit = CFG.ratePerMin) {
+  const now = Date.now();
+  let b = store.get(ip);
+  if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + 60e3 }; store.set(ip, b); }
+  if (b.count >= limit) return 'RATE_LIMIT';
   b.count++;
   return null;
 }
 // 오래된 버킷 정리
 setInterval(() => {
   const now = Date.now();
-  for (const [ip, b] of buckets) if (now > b.resetAt) buckets.delete(ip);
+  for (const store of [buckets, searchBuckets]) {
+    for (const [ip, b] of store) if (now > b.resetAt) store.delete(ip);
+  }
 }, 60e3).unref();
 
 /* ------------------------------------------------------------------ 입력 검증 */
@@ -100,6 +131,87 @@ function validatePoints(raw) {
   return { pts };
 }
 
+/* ------------------------------------------------------------------ Local search
+ * Contract source: official documentation summary supplied by the user, 2026-11-24.
+ * https://developers.kakao.com/docs/ko/local/dev-guide (not fetched in this cloud).
+ */
+function validateSearch(params) {
+  const known = new Set(['type', 'query', 'page', 'size']);
+  for (const key of params.keys()) {
+    if (!known.has(key) || params.getAll(key).length !== 1) return null;
+  }
+  const type = params.get('type');
+  if (!['keyword', 'address'].includes(type)) return null;
+  const query = (params.get('query') || '').trim();
+  if ([...query].length < 1 || [...query].length > 100 || /[\u0000-\u001f\u007f]/u.test(query)) return null;
+  const pageRaw = params.get('page') ?? '1';
+  const sizeRaw = params.get('size') ?? (type === 'keyword' ? '15' : '10');
+  if (!/^[1-9]\d*$/.test(pageRaw) || !/^[1-9]\d*$/.test(sizeRaw)) return null;
+  const page = Number(pageRaw), size = Number(sizeRaw);
+  if (page > 45 || size > (type === 'keyword' ? 15 : 30)) return null;
+  return { type, query, page, size };
+}
+
+function normalizeSearch(data, request) {
+  if (!Array.isArray(data?.documents) || data.documents.length > request.size ||
+      typeof data.meta?.is_end !== 'boolean') throw new UpstreamError('BAD_RESPONSE');
+  const text = v => typeof v === 'string' ? v : '';
+  const coordinate = (v, min, max) => {
+    if ((typeof v !== 'string' && typeof v !== 'number') || String(v).trim() === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? n : null;
+  };
+  const items = [];
+  for (const d of data.documents) {
+    const lat = coordinate(d?.y, -90, 90), lng = coordinate(d?.x, -180, 180);
+    if (lat === null || lng === null) continue;
+    const keyword = request.type === 'keyword';
+    items.push({
+      id: keyword && typeof d.id === 'string' ? d.id : null,
+      name: keyword ? text(d.place_name) :
+        (text(d.road_address?.building_name) || text(d.address_name) || text(d.address?.address_name)),
+      roadAddress: keyword ? text(d.road_address_name) : text(d.road_address?.address_name),
+      address: keyword ? text(d.address_name) : (text(d.address?.address_name) || text(d.address_name)),
+      lat, lng
+    });
+  }
+  return { items, page: request.page, hasMore: !data.meta.is_end && request.page < 45,
+    omittedCount: data.documents.length - items.length };
+}
+
+async function searchLocal(request) {
+  const key = JSON.stringify(request);
+  if (pendingSearches.has(key)) return pendingSearches.get(key);
+  if (pendingSearches.size >= CFG.searchConcurrency) throw new UpstreamError('SEARCH_BUSY');
+  const url = new URL(`/v2/local/search/${request.type}.json`, LOCAL_BASE);
+  url.search = new URLSearchParams({ query: request.query, page: String(request.page), size: String(request.size) });
+  // No automatic fallback, retries or retained query/result cache.
+  const pending = callKakao(url, { method: 'GET' }, searchBudget, CFG.searchTimeoutMs)
+    .then(data => normalizeSearch(data, request));
+  pendingSearches.set(key, pending);
+  try { return await pending; }
+  finally { pendingSearches.delete(key); }
+}
+
+function searchError(res, e) {
+  const code = e instanceof UpstreamError ? e.code : 'UNKNOWN';
+  const errors = {
+    KEY_INVALID: [502, '서버의 카카오 REST API 키가 거부되었습니다. 관리자에게 문의해 주세요.'],
+    KEY_FORBIDDEN: [502, '카카오 Local API 이용 권한을 확인해 주세요.'],
+    QUOTA: [429, '카카오 검색 API 호출 한도를 넘었습니다.'],
+    DAILY_BUDGET: [429, '이 서버의 검색 호출량 상한에 도달했습니다.'],
+    SEARCH_BUSY: [429, '검색 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.'],
+    TIMEOUT: [504, '검색 서버 응답 시간이 초과되었습니다.'],
+    NETWORK: [502, '카카오 검색 서버에 연결하지 못했습니다.'],
+    BAD_RESPONSE: [502, '카카오 검색 서버 응답을 처리하지 못했습니다.'],
+    UPSTREAM: [502, '카카오 검색 서버가 요청을 처리하지 못했습니다.']
+  };
+  const [status, error] = errors[code] || [500, '검색을 완료하지 못했습니다.'];
+  // Never log query strings, upstream response bodies, or error messages.
+  log('search failed', code);
+  return sendJson(res, status, { code, error });
+}
+
 /* ------------------------------------------------------------------ 거리 도우미 */
 function haversineM(a, b) {
   const R = 6371008.8, rad = Math.PI / 180;
@@ -114,27 +226,28 @@ class UpstreamError extends Error {
   constructor(code, detail) { super(code); this.code = code; this.detail = detail || ''; }
 }
 
-async function callKakao(url, init) {
+async function callKakao(url, init, budget = roadBudget, timeoutMs = CFG.timeoutMs) {
+  reserveCall(budget);
   const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), CFG.timeoutMs);
-  let res;
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    res = await fetch(url, {
-      ...init,
-      signal: ctl.signal,
+    const res = await fetch(url, {
+      ...init, redirect: 'error', signal: ctl.signal,
       headers: { ...(init?.headers || {}), Authorization: `KakaoAK ${CFG.key}` }
     });
+    if (res.status === 401) throw new UpstreamError('KEY_INVALID');
+    if (res.status === 403) throw new UpstreamError('KEY_FORBIDDEN');
+    if (res.status === 429) throw new UpstreamError('QUOTA');
+    if (!res.ok) throw new UpstreamError('UPSTREAM');
+    try { return await res.json(); }
+    catch (e) {
+      if (ctl.signal.aborted) throw new UpstreamError('TIMEOUT');
+      throw new UpstreamError('BAD_RESPONSE');
+    }
   } catch (e) {
-    throw new UpstreamError(e.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK');
-  } finally {
-    clearTimeout(t);
-  }
-  if (res.status === 401) throw new UpstreamError('KEY_INVALID');
-  if (res.status === 403) throw new UpstreamError('KEY_FORBIDDEN');
-  if (res.status === 429) throw new UpstreamError('QUOTA');
-  if (!res.ok) throw new UpstreamError('UPSTREAM', String(res.status));
-  try { return await res.json(); }
-  catch { throw new UpstreamError('BAD_RESPONSE'); }
+    if (e instanceof UpstreamError) throw e;
+    throw new UpstreamError(ctl.signal.aborted ? 'TIMEOUT' : 'NETWORK');
+  } finally { clearTimeout(t); }
 }
 
 /** routes 항목 하나에서 거리·시간을 꺼낸다. 실패하면 null. */
@@ -181,14 +294,16 @@ async function singlePair(a, b) {
 
 async function pooled(tasks, limit) {
   const results = new Array(tasks.length);
-  let next = 0;
+  let next = 0, failure;
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, async () => {
     while (true) {
       const i = next++;
-      if (i >= tasks.length) return;
-      results[i] = await tasks[i]();
+      if (failure || i >= tasks.length) return;
+      try { results[i] = await tasks[i](); }
+      catch (e) { failure ||= e; }
     }
   }));
+  if (failure) throw failure;
   return results;
 }
 
@@ -249,26 +364,29 @@ async function buildMatrix(pts) {
 
 /* ------------------------------------------------------------------ HTTP */
 function cors(req, res) {
+  res.setHeader('Vary', 'Origin');
   const origin = req.headers.origin;
-  if (!origin) return true;
-
-  // 브라우저는 같은 출처의 POST 에도 Origin 헤더를 붙인다.
-  // 이 서버가 화면을 직접 서빙하는 기본 배포 형태가 여기에 해당하므로,
-  // 같은 host 에서 온 요청은 허용 목록과 무관하게 통과시킨다.
-  const host = req.headers.host;
-  if (host) {
-    try { if (new URL(origin).host === host) return true; } catch { /* 형식 불량 */ }
+  if (!origin) return true; // Non-browser clients are not authenticated by CORS.
+  let allowed = false;
+  if (origin === 'null') {
+    // Opaque origins also include sandboxed documents; this does not identify a file.
+    allowed = CFG.allowFileOrigin;
+  } else {
+    try {
+      const parsed = new URL(origin);
+      const protocol = req.socket.encrypted ? 'https' :
+        (req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http');
+      const sameOrigin = origin === `${protocol}://${req.headers.host}`;
+      allowed = ['http:', 'https:'].includes(parsed.protocol) && parsed.origin === origin &&
+        (sameOrigin || CFG.allowOrigins.includes(origin) || CFG.allowOrigins.includes('*'));
+    } catch { /* Malformed origin stays denied. */ }
   }
-
-  if (CFG.allowOrigins.includes(origin) || CFG.allowOrigins.includes('*')) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Max-Age', '600');
-    return true;
-  }
-  return false;   // 허용 목록에 없는 출처는 브라우저가 응답을 버립니다
+  if (!allowed) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '600');
+  return true;
 }
 
 function sendJson(res, status, obj) {
@@ -289,7 +407,9 @@ const MIME = {
 };
 
 function serveStatic(req, res, urlPath) {
-  let p = decodeURIComponent(urlPath);
+  let p;
+  try { p = decodeURIComponent(urlPath); }
+  catch { return sendJson(res, 400, { code: 'BAD_REQUEST', error: '요청 주소가 올바르지 않습니다.' }); }
   // GitHub Pages 와 같은 하위 경로로 열어도 되게 한다
   if (p.startsWith('/cj-trip-order')) p = p.slice('/cj-trip-order'.length);
   // 서버 배포에서는 앱을 바로 제공해 주소창의 루트 경로를 유지한다.
@@ -315,7 +435,7 @@ function readBody(req, limit = 64 * 1024) {
     let n = 0; const chunks = [];
     req.on('data', c => {
       n += c.length;
-      if (n > limit) { reject(new Error('TOO_LARGE')); req.destroy(); return; }
+      if (n > limit) { reject(new Error('TOO_LARGE')); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -324,10 +444,24 @@ function readBody(req, limit = 64 * 1024) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const allowed = cors(req, res);
+  if (Buffer.byteLength(req.url || '') > 4096) {
+    return sendJson(res, 414, { code: 'REQUEST_TOO_LARGE', error: '요청 주소가 너무 깁니다.' });
+  }
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { return sendJson(res, 400, { code: 'BAD_REQUEST', error: '요청 주소가 올바르지 않습니다.' }); }
 
-  if (req.method === 'OPTIONS') { res.writeHead(allowed ? 204 : 403); return res.end(); }
+  if (!allowed) return sendJson(res, 403, { code: 'ORIGIN', error: '허용되지 않은 출처입니다.' });
+  if (req.method === 'OPTIONS') {
+    const method = req.headers['access-control-request-method'];
+    const headers = String(req.headers['access-control-request-headers'] || '')
+      .split(',').map(h => h.trim().toLowerCase()).filter(Boolean);
+    if ((method && !['GET', 'POST'].includes(method)) || headers.some(h => h !== 'content-type')) {
+      return sendJson(res, 403, { code: 'PREFLIGHT', error: '허용되지 않은 메서드 또는 헤더입니다.' });
+    }
+    res.writeHead(204); return res.end();
+  }
 
   // 명시적으로 허용한 공개 값만 반환합니다. CFG나 process.env를 직렬화하지 않습니다.
   if (url.pathname === '/api/config') {
@@ -347,9 +481,20 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  if (url.pathname === '/api/search') {
+    if (req.method !== 'GET') return sendJson(res, 405, { code: 'METHOD', error: 'GET 으로 요청해 주세요.' });
+    const request = validateSearch(url.searchParams);
+    if (!request) return sendJson(res, 400, { code: 'BAD_SEARCH', error: '검색 방식·검색어·페이지·결과 수를 확인해 주세요.' });
+    if (!CFG.key) return sendJson(res, 503, { code: 'NO_KEY', error: '서버 검색 설정이 필요합니다. 관리자에게 문의해 주세요.' });
+    if (rateLimit(clientIp(req), searchBuckets, CFG.searchRate)) {
+      return sendJson(res, 429, { code: 'RATE_LIMIT', error: '검색 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' });
+    }
+    try { return sendJson(res, 200, await searchLocal(request)); }
+    catch (e) { return searchError(res, e); }
+  }
+
   if (url.pathname === '/api/matrix') {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST 로 요청해 주세요.' });
-    if (!allowed) return sendJson(res, 403, { code: 'ORIGIN', error: '허용되지 않은 출처입니다.' });
     if (!CFG.key) {
       return sendJson(res, 503, {
         code: 'NO_KEY',
@@ -360,23 +505,25 @@ const server = http.createServer(async (req, res) => {
     if (limited) {
       return sendJson(res, 429, {
         code: limited,
-        error: limited === 'DAILY_BUDGET'
-          ? '오늘 이 서버에 허용된 길찾기 호출량을 모두 썼습니다.'
-          : '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.'
+        error: '요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.'
       });
     }
 
     let payload;
     try { payload = JSON.parse(await readBody(req) || '{}'); }
-    catch { return sendJson(res, 400, { code: 'BAD_JSON', error: '요청 형식이 올바르지 않습니다.' }); }
+    catch (e) {
+      const tooLarge = e.message === 'TOO_LARGE';
+      return sendJson(res, tooLarge ? 413 : 400, {
+        code: tooLarge ? 'REQUEST_TOO_LARGE' : 'BAD_JSON', error: '요청 형식 또는 크기가 올바르지 않습니다.'
+      });
+    }
 
-    const v = validatePoints(payload.points);
+    const v = validatePoints(payload?.points);
     if (v.error) return sendJson(res, 400, { code: 'BAD_POINTS', error: v.error });
 
     try {
       const t0 = Date.now();
       const { matrix, missing, stats } = await buildMatrix(v.pts);
-      dailyUsed += stats.multiCalls + stats.singleCalls;
       log(`matrix pts=${v.pts.length} multi=${stats.multiCalls} single=${stats.singleCalls} ` +
           `missing=${missing.length} ${Date.now() - t0}ms`);
       return sendJson(res, 200, {
@@ -394,7 +541,8 @@ const server = http.createServer(async (req, res) => {
         TIMEOUT:       [504, '카카오 길찾기 서버 응답이 제한 시간 안에 오지 않았습니다.'],
         NETWORK:       [502, '카카오 길찾기 서버에 연결하지 못했습니다.'],
         BAD_RESPONSE:  [502, '카카오 길찾기 서버가 예상과 다른 응답을 보냈습니다.'],
-        UPSTREAM:      [502, '카카오 길찾기 서버가 요청을 처리하지 못했습니다.']
+        UPSTREAM:      [502, '카카오 길찾기 서버가 요청을 처리하지 못했습니다.'],
+        DAILY_BUDGET:  [429, '오늘 이 서버에 허용된 길찾기 호출량을 모두 썼습니다.']
       };
       const [status, msg] = map[code] || [500, '도로거리를 계산하지 못했습니다.'];
       return sendJson(res, status, { code, error: msg });

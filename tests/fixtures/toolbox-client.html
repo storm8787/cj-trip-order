@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>출장 API 연결 검증 전용</title>
+<label>API 주소 <input id="base"></label>
+<label>검색어 <input id="query" value="충주시청"></label>
+<button id="search">검색</button>
+<ul id="items"></ul>
+<button id="matrix">선택한 지점 도로거리 조회</button>
+<pre id="status" aria-live="polite"></pre>
+<script>
+// 통합 테스트용 최소 클라이언트. 실제 업무도구함이나 방문순서 계산기는 아님.
+const selected = [];
+window.result = null;
+async function request(path, options = {}) {
+  const base = document.getElementById('base').value.replace(/\/+$/, '');
+  const response = await fetch(base + path, { ...options, credentials: 'omit' });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.code + ': ' + body.error);
+  return body;
+}
+async function run(fn) {
+  window.result = null;
+  try {
+    window.result = await fn();
+    document.getElementById('status').textContent = JSON.stringify(window.result);
+  } catch (e) {
+    window.result = { error: e.message };
+    document.getElementById('status').textContent = e.message;
+  }
+}
+document.getElementById('search').onclick = () => run(async () => {
+  const query = document.getElementById('query').value;
+  const data = await request('/api/search?' + new URLSearchParams({type:'keyword', query}));
+  const list = document.getElementById('items');
+  list.replaceChildren(); selected.length = 0;
+  for (const item of data.items) {
+    const li = document.createElement('li'), button = document.createElement('button');
+    button.textContent = item.name + ' 선택';
+    button.onclick = () => { selected.push(item); button.disabled = true; };
+    li.append(button); list.append(li);
+  }
+  return data;
+});
+document.getElementById('matrix').onclick = () => run(() => request('/api/matrix', {
+  method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ points: selected.map(({lat,lng}) => ({lat,lng})) })
+}));
+</script>
