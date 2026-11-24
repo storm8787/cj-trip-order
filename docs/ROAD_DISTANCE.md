@@ -24,9 +24,13 @@ REST 키는 JavaScript 키와 달리 **도메인 제한으로 보호되지 않�
 HTML에 넣으면 소스 보기만으로 그대로 유출됩니다.
 그래서 키를 다루는 최소한의 중계 서버를 따로 둡니다.
 
-브라우저는 좌표만 보내고 거리표만 돌려받습니다. **키는 브라우저로 내려가지 않습니다.**
+도로거리 요청에서는 브라우저가 좌표만 보내고 거리표를 돌려받습니다. **키는 브라우저로 내려가지 않습니다.**
 
 ---
+
+업무도구함용 `GET /api/search`는 같은 서버가 카카오 Local API를 호출해 장소·주소를 반환합니다.
+기존 사이트의 SDK 검색은 유지합니다. 검색 계약·공식 문서 근거·로컬 HTML 예제는
+[업무도구함 연동 안내](WORK_TOOLBOX_INTEGRATION.md)에 있습니다.
 
 ## 2. 빠른 시작
 
@@ -106,12 +110,26 @@ JavaScript 키는 브라우저 사용을 위한 공개 값이므로 개발자도
 | `KAKAO_RADIUS` | `10000` | 일괄 조회 반경(m). **API 상한이 10000이라 그 이상은 무시됩니다** |
 | `MAX_POINTS` | `9` | 한 번에 계산할 지점 수 (출발지 1 + 출장지 8) |
 | `RATE_LIMIT_PER_MIN` | `20` | IP당 분당 거리표 요청 수 |
-| `DAILY_CALL_BUDGET` | `5000` | 이 서버가 하루에 쓸 카카오 호출 수 상한 |
+| `DAILY_CALL_BUDGET` | `5000` | 프로세스별 약 24시간 길찾기 외부 호출 시도 상한. 0이면 중지 |
 | `UPSTREAM_TIMEOUT_MS` | `10000` | 카카오 응답 대기 시간 |
-| `UPSTREAM_CONCURRENCY` | `4` | 카카오에 동시에 보내는 요청 수 |
-| `ALLOWED_ORIGINS` | (없음) | 다른 주소에 올린 화면을 허용할 때. 쉼표로 구분 |
+| `UPSTREAM_CONCURRENCY` | `4` | 거리표 요청 하나에서 동시에 보내는 길찾기 요청 수 |
+| `ALLOWED_ORIGINS` | (없음) | 다른 웹 출처를 허용할 때. 쉼표로 구분 |
+| `ALLOW_FILE_ORIGIN` | `false` | 정확히 `true`인 경우만 로컬 파일 등 `Origin: null` 요청 허용 |
+| `SEARCH_RATE_LIMIT_PER_MIN` | `30` | IP당 분당 검색 요청 제한 |
+| `SEARCH_DAILY_CALL_BUDGET` | `1000` | 검색 외부 호출 시도 상한. 길찾기와 별도, 0이면 중지 |
+| `SEARCH_TIMEOUT_MS` | `5000` | 검색 응답 본문 수신까지의 제한 시간(ms) |
+| `SEARCH_UPSTREAM_CONCURRENCY` | `4` | 서버 전체 동시 검색 외부 호출 수 |
 | `SERVE_STATIC` | `true` | `false` 면 API만 제공하고 화면은 서빙하지 않습니다 |
 
+요청 제한 변수(`RATE_LIMIT_PER_MIN`, `SEARCH_RATE_LIMIT_PER_MIN`)는 1~10000 정수,
+호출 상한(`DAILY_CALL_BUDGET`, `SEARCH_DAILY_CALL_BUDGET`)은 0~1000000 정수,
+타임아웃은 1~60000 정수(ms), 동시 실행 수는 1~32 정수입니다. 잘못된 값은 시작 시 거부합니다.
+
+호출 상한은 외부 요청 전에 차감하며 실패·타임아웃도 포함합니다. 검색과 길찾기는 따로 집계합니다.
+메모리 기반이므로 재시작 시 초기화되고 여러 인스턴스에 공유되지 않습니다.
+한국시간 자정 기준이 아닌 약 24시간 창이며 카카오 공식 무료 쿼터나 과금 방지 보장이 아닙니다.
+
+> `KAKAO_LOCAL_BASE`는 Local API 루프백 Mock 전용입니다. 운영에서 설정하지 않습니다.
 > `KAKAO_NAVI_BASE` 는 테스트에서 가짜 상위 서버를 끼우기 위한 값입니다. 운영에서는 설정하지 마세요.
 
 ---
@@ -154,6 +172,13 @@ https://길찾기서버.example.com
    설정에서 서버 주소를 입력하면 됩니다.
 4. 서버는 **HTTPS** 로 공개해야 합니다. `https://` 페이지에서 `http://` 서버를
    부르면 브라우저가 막습니다.
+
+로컬 HTML을 허용할 때는 `ALLOW_FILE_ORIGIN=true`를 추가합니다. 같은 출처는 자동 허용하고,
+외부 웹 출처는 명시적 목록으로 유지합니다. `ALLOWED_ORIGINS=null`이나 `*`만으로는 로컬을 허용하지 않습니다.
+GET·POST와 오류 응답에 같은 CORS 정책을 적용하며 OPTIONS는 `Content-Type`만 허용합니다.
+쿠키·로그인 자격증명은 사용하지 않습니다. `Origin: null`은 특정 로컬 파일을 식별하지 않습니다.
+**CORS는 사용자 인증·사용량 보호 장치가 아닙니다.** Origin 없는 직접 호출도 가능하며
+IP 제한은 앞단 프록시의 IP 전달 정책에 영향을 받습니다.
 
 > 서버를 인터넷에 공개하면 남이 내 카카오 호출량을 쓸 수 있습니다.
 > `ALLOWED_ORIGINS`, `RATE_LIMIT_PER_MIN`, `DAILY_CALL_BUDGET` 을 꼭 설정하세요.
@@ -233,8 +258,10 @@ https://길찾기서버.example.com
 ## 8. 검증 범위
 
 ```bash
-node tests/road.mjs      # 도로거리 모드 (83건)
+node tests/road.mjs      # 도로거리 모드 (85건)
 node tests/verify.mjs    # 직선거리 모드와 화면 전반 (122건)
+node tests/config.mjs    # 공개 설정·SDK 초기화 (32건)
+node --test tests/search.mjs # Local 검색·호출 상한·브라우저 CORS
 ```
 
 `tests/road.mjs` 는 **가짜 상위 서버**를 띄우고 진짜 `server/server.mjs` 와

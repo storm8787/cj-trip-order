@@ -16,7 +16,7 @@
    CSS와 JavaScript는 그 안에 들어 있어야 합니다.
 2. **빌드 없음.** React, Vue, Next.js, Vite, 번들러, 트랜스파일러를 도입하지 않습니다.
    최종 사용자가 받는 산출물은 언제나 HTML 파일 하나입니다.
-3. **서버는 도로거리와 공개 검색 설정용, 그리고 선택사항.** 데이터베이스, Cloudflare(Pages/Workers/D1),
+3. **서버는 도로거리·공개 검색 설정·업무도구함용 Local 검색 중계용, 그리고 선택사항.** 데이터베이스, Cloudflare(Pages/Workers/D1),
    Supabase, Firebase 는 여전히 금지입니다.
    `server/server.mjs` 하나만 예외로 허용하며, 존재 이유는 **카카오 REST API 키를
    브라우저에 노출하지 않기 위해서**입니다. 의존성 0개, Node 내장 모듈만 씁니다.
@@ -75,7 +75,7 @@ Haversine 으로 계산합니다. 열거 부분은 원래부터 `D[i][j]` 를 �
 
 좌표가 없는 검색 결과는 목록에서 제외하고 그 사실을 알립니다.
 
-## 알려진 제약 — `file://` 에서 장소 검색 불가
+## 알려진 제약 — 기존 HTML의 `file://` SDK 장소 검색 불가
 
 로컬 파일로 열면 **SDK 로딩은 되지만 장소 검색은 거부됩니다.**
 `sdk.js` 는 평범한 `<script>` 태그라 출처 검사를 받지 않는 반면,
@@ -84,6 +84,10 @@ Haversine 으로 계산합니다. 열거 부분은 원래부터 `D[i][j]` 를 �
 이 제약을 **디자인 변경으로 해결된 것처럼 표현하지 마세요.**
 원인 안내와 좌표 직접 입력 대안을 항상 남겨 두어야 합니다.
 
+업무도구함용 서버 REST 검색은 별도입니다. `ALLOW_FILE_ORIGIN=true`일 때만 불투명 출처를
+허용하며, 특정 로컬 파일의 인증을 뜻하지 않습니다. 기존 HTML을 이 검색 API로 전환하지 않습니다.
+서버 대상·키·에러·호출 상한 계약은 [업무도구함 연동 안내](docs/WORK_TOOLBOX_INTEGRATION.md)를 따릅니다.
+
 ## 테스트
 
 ```bash
@@ -91,8 +95,12 @@ npm i -D playwright && npx playwright install chromium
 node tests/verify.mjs    # 직선거리 모드와 화면 전반
 node tests/road.mjs      # 도로거리 모드 (가짜 상위 서버 사용)
 node tests/config.mjs    # 공개 설정·자동/수동 검색 초기화 (Mock SDK)
+node --test tests/search.mjs # Local 검색·한도·실제 브라우저 CORS (Mock 상위 서버)
 ```
 
+- `tests/search.mjs`의 `KAKAO_LOCAL_BASE`는 HTTP 루프백 Mock 전용입니다. 운영 주소를 입력받는 범용 프록시로 확장하지 않습니다.
+- REST 키·검색어·주소·상위 오류 원문을 로그/오류 응답에 남기지 않습니다. 호출 상한은 외부 fetch 전에 차감하며 실패 호출도 포함합니다. 검색과 길찾기의 예산은 분리합니다.
+- 브라우저 CORS 검증에서 웹 보안을 끄거나 `file://`를 다른 출처로 치환하지 않습니다.
 - 실제 배포 파일을 Chromium에서 `file://` 와 가상 `https://` 양쪽으로 열어 검증합니다.
 - 카카오 SDK와 카카오모빌리티 길찾기는 모두 **Mock**으로 대체합니다.
   실제 카카오 서버에는 접속하지 않습니다.
@@ -126,6 +134,7 @@ GitHub Pages가 `main` 브랜치 루트를 서빙합니다. 별도 빌드·배�
 | `README.md` | 최종 사용자용 — 실행, 키 발급, 배포, 문제 해결 |
 | `AGENTS.md` | 이 문서 — 설계 제약, 보존 기능, 테스트, 작업 방식 |
 | `docs/UI_GUIDE.md` | 화면 구성, 디자인 토큰, 공통 패턴, 수정 기준 |
-| `docs/ROAD_DISTANCE.md` | 도로거리 서버 — 환경변수, 배포, 조회 전략, 오류 코드 |
+| `docs/ROAD_DISTANCE.md` | 서버 운영 — 환경변수, 배포, 도로거리 조회 전략, 오류 코드 |
+| `docs/WORK_TOOLBOX_INTEGRATION.md` | 업무도구함 API 계약·예제·연동 및 인계 사항 |
 
 같은 내용을 여러 파일에 반복해 적지 마세요. 다른 문서의 내용이 필요하면 링크로 가리킵니다.
